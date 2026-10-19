@@ -80,10 +80,15 @@ export declare class OpenDesignAdapter extends LlmAdapter {
      *
      * Routing accepts ids outside the seed catalog, so an unknown id resolves to
      * itself instead of failing; the catalog stays advisory.
+     *
+     * The returned metadata is what the picker renders: `context` drives the
+     * context-window display and truncation warnings, `defaultMaxTokens` caps
+     * output, and `reasoning` is what makes a reasoning-effort selector appear at
+     * all. Omitting any of them is why the selector was missing.
      * @param provider - registered provider route.
      * @param model - exact model id from the request.
      * @param _signal - cancellation for this lookup; the seed needs none.
-     * @returns provider/model identity plus any seed-declared modalities.
+     * @returns provider/model identity plus resolved parameters.
      */
     resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
     /**

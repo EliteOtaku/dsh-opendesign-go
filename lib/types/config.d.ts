@@ -87,6 +87,10 @@ export interface LiveConfig {
     readonly diagnosticsJson: {
         get(): string;
     };
+    /** Per-model parameter overrides, serialized. */
+    readonly modelParamsJson: {
+        get(): string;
+    };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {
         get(): string;

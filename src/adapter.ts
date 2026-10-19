@@ -25,6 +25,7 @@ import {
   attributionHeaders,
   errorChain,
 } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { accountsOf } from './accounts.ts'
 import type {
   FinishReason,
@@ -36,6 +37,7 @@ import type {
   TokenUsage,
 } from '@deepseek-ai/dsh-llm'
 import { listSeedModels, seedModel } from './catalog.ts'
+import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS, paramsOf } from './model-params.ts'
 import { DISPLAY_NAME, type OpenDesignConfig } from './config-contract.ts'
 import { toChatMessages, toChatTools } from './conversion.ts'
 import {
@@ -154,19 +156,39 @@ export class OpenDesignAdapter extends LlmAdapter {
    *
    * Routing accepts ids outside the seed catalog, so an unknown id resolves to
    * itself instead of failing; the catalog stays advisory.
+   *
+   * The returned metadata is what the picker renders: `context` drives the
+   * context-window display and truncation warnings, `defaultMaxTokens` caps
+   * output, and `reasoning` is what makes a reasoning-effort selector appear at
+   * all. Omitting any of them is why the selector was missing.
    * @param provider - registered provider route.
    * @param model - exact model id from the request.
    * @param _signal - cancellation for this lookup; the seed needs none.
-   * @returns provider/model identity plus any seed-declared modalities.
+   * @returns provider/model identity plus resolved parameters.
    */
   async resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
     const row = seedModel(model)
-    if (row === undefined) return { provider, id: model, name: model }
+    const params = paramsOf(model, this.#options.config().modelParams)
+    const reasoning = {
+      efforts: REASONING_EFFORTS.map((effort) => ({ id: ReasoningEffortId(effort.id), name: effort.name })),
+      defaultEffort: ReasoningEffortId(DEFAULT_REASONING_EFFORT),
+    }
+    if (row === undefined) {
+      // An unknown id still gets the effort list: the gateway accepts the
+      // parameter for every model it serves, and hiding the selector would be a
+      // regression for ids newer than this build.
+      return { provider, id: model, name: model, reasoning }
+    }
     return {
       provider,
       id: row.id,
       name: row.name,
       ...(row.inputModalities === undefined ? {} : { inputModalities: row.inputModalities }),
+      ...(params === undefined ? {} : {
+        context: { contextWindow: params.contextWindow },
+        defaultMaxTokens: params.maxTokens,
+      }),
+      reasoning,
     }
   }
 
@@ -272,7 +294,14 @@ async function dispatch(
   const tools = toChatTools(options)
   if (tools !== undefined) body.tools = tools
   if (options.temperature !== undefined) body.temperature = options.temperature
-  if (options.maxTokens !== undefined) body.max_tokens = options.maxTokens
+  // A caller-provided cap wins; otherwise the model's own `output_budget` is
+  // used, because leaving it to the provider silently caps some models far
+  // below what they advertise.
+  const maxTokens = options.maxTokens ?? paramsOf(options.model, config.modelParams)?.maxTokens
+  if (maxTokens !== undefined) body.max_tokens = maxTokens
+  // The gateway honours `reasoning_effort`: the four values change
+  // `reasoning_tokens` in the response rather than being ignored.
+  if (options.reasoningEffort !== undefined) body.reasoning_effort = options.reasoningEffort
   if (options.stop !== undefined && options.stop.length > 0) body.stop = options.stop
 
   const headers: Record<string, string> = {

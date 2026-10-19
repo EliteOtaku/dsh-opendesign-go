@@ -1,0 +1,296 @@
+[
+ {
+  "id": "claude-haiku-5.5",
+  "object": "model",
+  "created": 1791441624,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text",
+    "image",
+    "file"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "low",
+   "capability": "standard",
+   "context_limit": 1000000,
+   "context_budget": 228000,
+   "output_budget": 128000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "deepseek-v4-flash",
+  "object": "model",
+  "created": 1779727422,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "medium",
+   "capability": "standard",
+   "context_limit": 1048000,
+   "context_budget": 232000,
+   "output_budget": 32000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "deepseek-v4-flash-vision-exp",
+  "object": "model",
+  "created": 1787319061,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "medium",
+   "capability": "standard",
+   "context_limit": 1048000,
+   "context_budget": 232000,
+   "output_budget": 32000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "deepseek-v4-pro",
+  "object": "model",
+  "created": 1779727422,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "high",
+   "capability": "advanced",
+   "context_limit": 1048000,
+   "context_budget": 328000,
+   "output_budget": 128000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "deepseek-v4.1-flash",
+  "object": "model",
+  "created": 1789026056,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "low",
+   "capability": "advanced",
+   "context_limit": 1048000,
+   "context_budget": 328000,
+   "output_budget": 128000
+  },
+  "default": true,
+  "enabled": true
+ },
+ {
+  "id": "glm-5.3-flash",
+  "object": "model",
+  "created": 1787830162,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text",
+    "image",
+    "video"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "low",
+   "capability": "advanced",
+   "context_limit": 1048000,
+   "context_budget": 232000,
+   "output_budget": 32000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "glm-5.3-flashx",
+  "object": "model",
+  "created": 1789875187,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text",
+    "image",
+    "file",
+    "video"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "medium",
+   "capability": "advanced",
+   "context_limit": 1000000,
+   "context_budget": 232000,
+   "output_budget": 32000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "gpt-6-luna",
+  "object": "model",
+  "created": 1790144301,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text",
+    "image",
+    "file"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "low",
+   "capability": "standard",
+   "context_limit": 1050000,
+   "context_budget": 400000,
+   "output_budget": 128000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "hy4-preview",
+  "object": "model",
+  "created": 1788267974,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "medium",
+   "capability": "advanced",
+   "context_limit": 1048000,
+   "context_budget": 232000,
+   "output_budget": 32000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "kimi-k2.7-code",
+  "object": "model",
+  "created": 1781755617,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "medium",
+   "capability": "advanced",
+   "context_limit": 262000,
+   "context_budget": 262000,
+   "output_budget": 32000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "mimo-v2.6-flash",
+  "object": "model",
+  "created": 1790047867,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text",
+    "image",
+    "audio",
+    "video"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "low",
+   "capability": "standard",
+   "context_limit": 1048000,
+   "context_budget": 232000,
+   "output_budget": 32000
+  },
+  "default": false,
+  "enabled": true
+ },
+ {
+  "id": "mimo-v2.6-pro",
+  "object": "model",
+  "created": 1790047867,
+  "owned_by": "vela",
+  "architecture": {
+   "input_modalities": [
+    "text",
+    "image",
+    "audio",
+    "video"
+   ],
+   "output_modalities": [
+    "text"
+   ]
+  },
+  "metadata": {
+   "cost": "medium",
+   "capability": "advanced",
+   "context_limit": 1048000,
+   "context_budget": 232000,
+   "output_budget": 32000
+  },
+  "default": false,
+  "enabled": true
+ }
+]

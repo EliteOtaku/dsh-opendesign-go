@@ -101,6 +101,17 @@ export interface OpenDesignConfig {
   readonly useVelaCredential: boolean
   /** Serialized route diagnostics, written by the host for the page. */
   readonly diagnosticsJson: string
+  /**
+   * Per-model parameter overrides, serialized as JSON.
+   *
+   * A JSON string rather than a `dict` field: the settings form walker only
+   * descends `object` and `dict` nodes that survive `volatile()`, and a dict of
+   * objects silently drops out of the projection — the same failure that once
+   * hid this plugin's whole page.
+   */
+  readonly modelParamsJson: string
+  /** Parsed override table, filled by `readConfig`. */
+  readonly modelParams?: Readonly<Record<string, { contextWindow?: number, maxTokens?: number }>>
   /** Inference base URL without a trailing slash. */
   readonly baseURL: string
   /** Deadline for one dispatch, spanning discovery through streaming. */

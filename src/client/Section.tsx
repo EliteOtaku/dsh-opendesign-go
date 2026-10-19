@@ -15,7 +15,6 @@
 import { useMemo, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
 import { PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
 import type { UsageSnapshot } from '../usage-contract.ts'
@@ -24,6 +23,7 @@ import { parseRouteDiagnostics } from '../diagnostics.ts'
 import { QuotaCard } from './QuotaCard.tsx'
 import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
+import { ModelsCard } from './ModelsCard.tsx'
 import type { ChannelState, ExecuteAccountCommand } from './accounts-controller.ts'
 
 /** Props injected into the section by the registering plugin. */
@@ -214,28 +214,23 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
       </div>
 
       <div style={cardStyle}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>可用模型</div>
-        <p style={{ ...hintStyle, marginTop: '4px' }}>
-          Go 套餐授予的 {GO_DESIGN_PLAN_MODELS.length} 个 Design Plan 模型（Go 不含套餐模型额度）。
-        </p>
-        {routeState !== undefined && (
-          <p style={{ ...hintStyle, fontSize: '12px', marginTop: '6px' }}>
-            路由状态：{routeState.registered ? '已注册' : '未注册'}
+        <div style={{ fontSize: '14px', fontWeight: 500 }}>路由状态</div>
+        {routeState === undefined ? (
+          <p style={{ ...hintStyle, marginTop: '4px' }}>
+            宿主尚未上报路由状态。重启后若仍为空，说明插件未完成激活。
+          </p>
+        ) : (
+          <p style={{ ...hintStyle, marginTop: '4px', fontSize: '12px' }}>
+            {routeState.registered ? '已注册' : '未注册'}
             {' · '}启用={String(routeState.enabled)}
             {' · '}凭据={routeState.credentialResolved ? '已解析' : '未解析'}（{routeState.triedRef || '无'}）
             {' · '}声明模型 {routeState.modelCount} 个
             {routeState.lastError !== undefined && ` · 失败：${routeState.lastError}`}
           </p>
         )}
-        <ul style={listStyle}>
-          {GO_DESIGN_PLAN_MODELS.map((model) => (
-            <li key={model.id}>
-              <div>{model.name}</div>
-              <div style={{ ...hintStyle, fontSize: '12px' }}>{model.id}</div>
-            </li>
-          ))}
-        </ul>
       </div>
+
+      <ModelsCard form={form} config={value} editable={editable} />
     </div>
   )
 }

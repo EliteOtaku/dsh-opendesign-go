@@ -30,6 +30,7 @@ function liveConfigOf(values: OpenDesignConfig): LiveConfig {
     reportJson: { get: () => values.reportJson },
     useVelaCredential: { get: () => values.useVelaCredential },
     diagnosticsJson: { get: () => values.diagnosticsJson },
+    modelParamsJson: { get: () => values.modelParamsJson },
     baseURL: { get: () => values.baseURL },
     requestTimeoutMs: { get: () => values.requestTimeoutMs },
     streamIdleTimeoutMs: { get: () => values.streamIdleTimeoutMs },
@@ -47,6 +48,8 @@ const DEFAULTS: OpenDesignConfig = {
   reportJson: '',
   useVelaCredential: false,
   diagnosticsJson: '',
+  modelParamsJson: '',
+  modelParams: {},
   baseURL: DEFAULT_BASE_URL,
   requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
   streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
@@ -54,7 +57,10 @@ const DEFAULTS: OpenDesignConfig = {
 
 describe('PlainConfig', () => {
   it('fills every declared default when called without input', () => {
-    expect(PlainConfig()).toEqual(DEFAULTS)
+    // `modelParams` is derived by readConfig from modelParamsJson, so the plain
+    // schema does not carry it.
+    const { modelParams: _derived, ...plain } = DEFAULTS
+    expect(PlainConfig()).toEqual(plain)
   })
 
   it('pins the documented timeout defaults', () => {
