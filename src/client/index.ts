@@ -47,7 +47,11 @@ export function apply(ctx: ClientContext): void {
   // registered only once the transport exists.
   ctx.inject(['configForms'], (ready) => {
     const form = ready.configForms.get<OpenDesignConfig>(PROFILE_ENTRY_ID)
-    const injected = (): OpenDesignSectionInjected => ({ form, execute: commands.execute })
+    const injected = (): OpenDesignSectionInjected => ({
+      form,
+      execute: commands.execute,
+      channelState: commands.state,
+    })
     ready.effect(() => ready.slots.inject('settings.section', () => ready.slots.register({
       name: 'settings.section',
       id: PROFILE_ENTRY_ID,

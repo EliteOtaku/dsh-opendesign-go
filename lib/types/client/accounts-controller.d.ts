@@ -17,6 +17,8 @@ import type { AccountCommand, AccountCommandResult } from '../account-command.ts
 export declare const ACCOUNTS_REMOTE = "remote.openDesignGoAccounts";
 /** Executes one command on the host. */
 export type ExecuteAccountCommand = (command: AccountCommand) => Promise<AccountCommandResult>;
+/** Reads which step the command channel reached, for diagnostics. */
+export type ChannelState = () => string;
 /**
  * Mount the Remote namespace once and return a command executor.
  *
@@ -29,4 +31,5 @@ export type ExecuteAccountCommand = (command: AccountCommand) => Promise<Account
 export declare function accountCommands(ctx: ClientContext): {
     execute: ExecuteAccountCommand;
     ready: Promise<unknown>;
+    state: () => string;
 };

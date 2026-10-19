@@ -23,7 +23,7 @@ import { parseReport, parseUsage } from '../usage-contract.ts'
 import { QuotaCard } from './QuotaCard.tsx'
 import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
-import type { ExecuteAccountCommand } from './accounts-controller.ts'
+import type { ChannelState, ExecuteAccountCommand } from './accounts-controller.ts'
 
 /** Props injected into the section by the registering plugin. */
 export interface OpenDesignSectionInjected {
@@ -31,6 +31,8 @@ export interface OpenDesignSectionInjected {
   readonly form: ConfigForm<OpenDesignConfig>
   /** Sends account mutations to the host, which owns credential storage. */
   readonly execute: ExecuteAccountCommand
+  /** Reads which step the command channel reached, for diagnostics. */
+  readonly channelState: ChannelState
 }
 
 const pageStyle = {
@@ -95,7 +97,7 @@ const inputStyle = {
  * @param props - injected config form and optional quota reader.
  * @returns the page body.
  */
-export function OpenDesignSection({ form, execute }: OpenDesignSectionInjected): ReactElement {
+export function OpenDesignSection({ form, execute, channelState }: OpenDesignSectionInjected): ReactElement {
   const snapshot = useSyncExternalStore(
     (listener) => form.subscribe(listener),
     () => form.getSnapshot(),
@@ -190,7 +192,7 @@ export function OpenDesignSection({ form, execute }: OpenDesignSectionInjected):
         </div>
       </div>
 
-      <AccountsCard form={form} config={value} editable={editable} execute={execute} />
+      <AccountsCard form={form} config={value} editable={editable} execute={execute} channelState={channelState} />
 
       <UsageCard report={report} />
 

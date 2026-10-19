@@ -17,7 +17,7 @@ import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { MAX_ACCOUNTS, accountsOf } from '../accounts.ts'
 import type { OpenDesignAccount } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
-import type { ExecuteAccountCommand } from './accounts-controller.ts'
+import type { ChannelState, ExecuteAccountCommand } from './accounts-controller.ts'
 
 const card = {
   border: '1px solid rgba(128, 128, 128, 0.25)',
@@ -66,12 +66,14 @@ function outcomeMessage(result: 'applied' | 'rejected' | 'unknown'): string | un
  * @param props - config form, current accounts, and the command executor.
  * @returns the card.
  */
-export function AccountsCard({ form, config, editable, execute }: {
+export function AccountsCard({ form, config, editable, execute, channelState }: {
   readonly form: ConfigForm<OpenDesignConfig>
   readonly config: OpenDesignConfig | undefined
   readonly editable: boolean
   /** Sends an account command to the host, which owns credential storage. */
   readonly execute: ExecuteAccountCommand
+  /** Reads which step the command channel reached, for diagnostics. */
+  readonly channelState: ChannelState
 }): ReactElement {
   const [adding, setAdding] = useState(false)
   const [replacing, setReplacing] = useState<string | undefined>(undefined)
@@ -104,7 +106,9 @@ export function AccountsCard({ form, config, editable, execute }: {
           onApplied?.()
           return
         }
-        setError(message)
+        // Name the stage the channel reached: "未就绪" alone cannot distinguish a
+        // failed mount from a namespace that never appeared.
+        setError(result === 'unknown' ? `${message}（通道状态：${channelState()}）` : message)
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : String(reason))

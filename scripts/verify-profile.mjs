@@ -16,15 +16,34 @@
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const rootDir = dirname(dirname(fileURLToPath(import.meta.url)))
 
 const PACKAGE = 'dsh-opendesign-go'
-const RUNTIME_DEPS = [
-  '@deepseek-ai/dsh-llm',
-  '@deepseek-ai/dsh-credentials',
-  '@deepseek-ai/dsh-launch-environment',
-  '@deepseek-ai/schemastery',
-]
+
+/**
+ * Every external module the built Host bundle actually imports.
+ *
+ * Derived from the artifact rather than kept as a hand-written list: a list
+ * silently misses a dependency added later, and the failure it hides is the
+ * worst kind — `ctx.inject` on a service whose package cannot resolve simply
+ * never fires, so the feature looks unimplemented instead of broken.
+ * @returns bare module specifiers, deduplicated.
+ */
+function runtimeDepsOf() {
+  const bundlePath = join(rootDir, 'lib', 'index.js')
+  if (!existsSync(bundlePath)) return []
+  const source = readFileSync(bundlePath, 'utf8')
+  const found = new Set()
+  for (const match of source.matchAll(/^import\s[^'"]*from\s*['"]([^'"]+)['"]/gm)) {
+    const specifier = match[1]
+    if (specifier.startsWith('.') || specifier.startsWith('node:')) continue
+    found.add(specifier)
+  }
+  return [...found]
+}
 
 const profileIndex = process.argv.indexOf('--profile')
 const profileName = profileIndex === -1 ? 'desktop' : process.argv[profileIndex + 1]
@@ -59,7 +78,8 @@ check('bundle registered', bundles.includes(PACKAGE), bundles.includes(PACKAGE) 
 
 if (existsSync(installedDir)) {
   const require = createRequire(join(installedDir, 'lib', 'index.js'))
-  const unresolved = RUNTIME_DEPS.filter((name) => {
+  const runtimeDeps = runtimeDepsOf()
+  const unresolved = runtimeDeps.filter((name) => {
     try {
       require.resolve(name)
       return false
@@ -67,13 +87,38 @@ if (existsSync(installedDir)) {
       return true
     }
   })
-  check('runtime deps resolve', unresolved.length === 0, unresolved.length === 0 ? `${RUNTIME_DEPS.length} resolved` : `cannot resolve ${unresolved.join(', ')}`)
+  check('runtime deps resolve', unresolved.length === 0, unresolved.length === 0 ? `${runtimeDeps.length} resolved` : `cannot resolve ${unresolved.join(', ')}`)
 
   const clientPath = join(installedDir, 'lib', 'client.js')
   if (existsSync(clientPath)) {
     const client = readFileSync(clientPath, 'utf8')
     const enveloped = client.startsWith('window.__ModuleLoader__.load(') && !/^import\s/m.test(client)
     check('client bundle injectable', enveloped, enveloped ? 'module-loader envelope' : 'ESM client would fail the web boot')
+
+    // The page runs inside the browser shell, which supplies its own modules
+    // through `window.__ModuleLoader__`'s `require`. Those are expected to be
+    // absent from this package's node_modules, so only genuinely unresolvable
+    // third-party imports are a failure.
+    const SHELL_PROVIDED = new Set(['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client'])
+    const clientDeps = [...new Set([...client.matchAll(/require\(['"]([^'"]+)['"]\)/g)]
+      .map((match) => match[1])
+      .filter((name) => !name.startsWith('.') && !name.startsWith('node:')))]
+    const unresolvedClient = clientDeps.filter((name) => {
+      if (SHELL_PROVIDED.has(name)) return false
+      try {
+        require.resolve(name)
+        return false
+      } catch {
+        return true
+      }
+    })
+    check(
+      'client deps resolve',
+      unresolvedClient.length === 0,
+      unresolvedClient.length === 0
+        ? `${clientDeps.length} resolved (${clientDeps.filter((name) => SHELL_PROVIDED.has(name)).length} shell-provided)`
+        : `cannot resolve ${unresolvedClient.join(', ')}`,
+    )
   }
 }
 

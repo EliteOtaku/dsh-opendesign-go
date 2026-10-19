@@ -44,7 +44,8 @@
       "inject": [
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-renderer"
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-api-remotes"
       ],
       "platform": "web"
     }
@@ -81,10 +82,26 @@
     "@deepseek-ai/dsh-llm": ">=0.2.0-rc.1",
     "@deepseek-ai/dsh-settings": ">=0.2.0-rc.1",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.0-rc.1",
+    "@deepseek-ai/dsh-typert-registry": ">=0.2.0-rc.1",
+    "@deepseek-ai/dsh-api-remotes": ">=0.2.0-rc.1",
+    "@deepseek-ai/dsh-home-paths": ">=0.2.0-rc.1"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-settings": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-registry": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-remotes": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-home-paths": {
       "optional": true
     }
   },
