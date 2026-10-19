@@ -1,10 +1,9 @@
 /**
  * Smoke-test the shipped `lib/` artifact through the real Cordis runtime.
  *
- * This is the check that a consumer actually gets after installing the package:
- * it imports the built entry (not `src/`) and mounts it on a fresh Context.
- * A failure here means the published artifact cannot load, even if the sources
- * type-check.
+ * This is what a consumer actually gets after installing the package: it
+ * imports the built entry (not `src/`) and mounts it. A failure here means the
+ * published artifact cannot load, even if the sources type-check.
  *
  * @module scripts/plugin-smoke
  */
@@ -25,14 +24,31 @@ function assert(condition, message) {
 
 assert(plugin.name === 'llm-opendesign-go', `unexpected module name: ${String(plugin.name)}`)
 assert(typeof plugin.apply === 'function', 'apply is not exported as a function')
+assert(Array.isArray(plugin.GO_DESIGN_PLAN_MODELS), 'the Go model seed is not exported')
+assert(plugin.GO_DESIGN_PLAN_MODELS.length === 12, `expected 12 Design Plan models, saw ${plugin.GO_DESIGN_PLAN_MODELS.length}`)
 
+// 1) The real Cordis runtime must accept the module. This is the check that
+//    proves the bundle has no host-internal import and no top-level throw.
 const ctx = new Context()
 ctx.plugin(plugin)
 await new Promise((resolve) => setTimeout(resolve, 50))
 
+// 2) Mounting against a minimal host surface must reach the plugin body and
+//    report through the host logger instead of throwing at load.
 const lines = []
-plugin.apply({ logger: { info: (message) => lines.push(message) } })
-assert(lines.length === 1, `apply should log exactly once, saw ${lines.length}`)
-assert(lines[0].includes('llm-opendesign-go'), `unexpected mount log: ${lines[0]}`)
+const noop = () => {}
+const stub = {
+  logger: { info: (m) => lines.push(m), warn: (m) => lines.push(m), error: (m) => lines.push(m) },
+  effect: (fn) => {
+    const dispose = fn()
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  },
+  get: () => undefined,
+  inject: (_deps, callback) => callback({ on: noop, get: () => undefined, logger: stub.logger }),
+}
+plugin.apply(stub)
+assert(lines.some((line) => line.includes('llm-opendesign-go')), 'apply did not report through the host logger')
 
 console.log('plugin-smoke: built artifact loads and mounts on Cordis')
