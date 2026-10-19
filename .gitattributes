@@ -1,0 +1,13 @@
+# Build artifacts are compared byte-for-byte by `npm run check:dist`, so the
+# checkout must not rewrite line endings per platform.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
