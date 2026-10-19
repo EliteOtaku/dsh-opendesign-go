@@ -20,6 +20,7 @@ import { PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
 import type { UsageSnapshot } from '../usage-contract.ts'
 import { parseReport, parseUsage } from '../usage-contract.ts'
+import { parseRouteDiagnostics } from '../diagnostics.ts'
 import { QuotaCard } from './QuotaCard.tsx'
 import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
@@ -113,6 +114,7 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   // Local accounting: produced by this plugin's own adapter, so it needs no
   // console session and is the primary usage surface.
   const report = useMemo(() => parseReport(value?.reportJson), [value?.reportJson])
+  const routeState = useMemo(() => parseRouteDiagnostics(value?.diagnosticsJson), [value?.diagnosticsJson])
 
   /**
    * Flip the route switch. A refusal is surfaced instead of swallowed: the
@@ -216,6 +218,15 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
         <p style={{ ...hintStyle, marginTop: '4px' }}>
           Go 套餐授予的 {GO_DESIGN_PLAN_MODELS.length} 个 Design Plan 模型（Go 不含套餐模型额度）。
         </p>
+        {routeState !== undefined && (
+          <p style={{ ...hintStyle, fontSize: '12px', marginTop: '6px' }}>
+            路由状态：{routeState.registered ? '已注册' : '未注册'}
+            {' · '}启用={String(routeState.enabled)}
+            {' · '}凭据={routeState.credentialResolved ? '已解析' : '未解析'}（{routeState.triedRef || '无'}）
+            {' · '}声明模型 {routeState.modelCount} 个
+            {routeState.lastError !== undefined && ` · 失败：${routeState.lastError}`}
+          </p>
+        )}
         <ul style={listStyle}>
           {GO_DESIGN_PLAN_MODELS.map((model) => (
             <li key={model.id}>

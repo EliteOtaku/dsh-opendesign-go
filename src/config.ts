@@ -70,6 +70,7 @@ export const PlainConfig: z<OpenDesignConfig> = z.object({
   usageJson: z.string().default(''),
   reportJson: z.string().default(''),
   useVelaCredential: z.boolean().default(false),
+  diagnosticsJson: z.string().default(''),
   baseURL: z.string().default(DEFAULT_BASE_URL),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -98,6 +99,7 @@ export const Config = z.object({
   usageJson: z.string().default('').volatile(),
   reportJson: z.string().default('').volatile(),
   useVelaCredential: z.boolean().default(false).volatile(),
+  diagnosticsJson: z.string().default('').volatile(),
   baseURL: z.string().default(DEFAULT_BASE_URL).volatile(),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS).volatile(),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS).volatile(),
@@ -129,6 +131,8 @@ export interface LiveConfig {
   readonly reportJson: { get(): string }
   /** Whether quota is read through the OpenDesign app's own login. */
   readonly useVelaCredential: { get(): boolean }
+  /** Serialized route diagnostics. */
+  readonly diagnosticsJson: { get(): string }
   /** Inference base URL, stored as configured. */
   readonly baseURL: { get(): string }
   /** Deadline for one dispatch. */
@@ -153,6 +157,7 @@ export function readConfig(config: LiveConfig): OpenDesignConfig {
     usageJson: config.usageJson.get(),
     reportJson: config.reportJson.get(),
     useVelaCredential: config.useVelaCredential.get(),
+    diagnosticsJson: config.diagnosticsJson.get(),
     baseURL: migrateGatewayBaseURL(config.baseURL.get()),
     requestTimeoutMs: config.requestTimeoutMs.get(),
     streamIdleTimeoutMs: config.streamIdleTimeoutMs.get(),

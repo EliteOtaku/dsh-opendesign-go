@@ -30,6 +30,7 @@ import { costOf, summarize } from './usage-ledger.ts'
 import { priceOf } from './pricing.ts'
 import { locateVela } from './vela-locate.ts'
 import { readVelaUsage } from './vela-billing.ts'
+import type { RouteDiagnostics } from './diagnostics.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { UsageSnapshot } from './usage-contract.ts'
@@ -250,14 +251,41 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * switch remains reachable.
    * @param configured - whether the credential resolved.
    */
-  const applyRoute = (configured: boolean): void => {
+  /**
+   * Publish what the routing layer currently believes.
+   *
+   * The model picker shows nothing when the route is absent, and the reason can
+   * be any of "disabled", "no credential", or "registration refused" — all of
+   * which look identical in the UI. This makes the state visible instead.
+   * @param configured - whether the selected account's credential resolved.
+   * @param triedRef - the reference that was resolved.
+   * @param lastError - registration failure, when one occurred.
+   */
+  const publishDiagnostics = (configured: boolean, triedRef: string, lastError?: string): void => {
+    const write = fieldWriterOf(ctx)
+    if (write === undefined) return
+    const payload: RouteDiagnostics = {
+      registered: registration !== undefined,
+      enabled: current().enabled,
+      credentialResolved: configured,
+      triedRef,
+      ...(lastError === undefined ? {} : { lastError }),
+      modelCount: listSeedModels(PROVIDER_ID).length,
+      asOf: new Date().toISOString(),
+    }
+    void write('diagnosticsJson', JSON.stringify(payload)).catch(() => undefined)
+  }
+
+  const applyRoute = (configured: boolean, triedRef = ''): void => {
     const enabled = current().enabled
     if (configured && enabled && registration === undefined) {
       try {
         registration = ctx.llm.registerAdapter([PROVIDER_ID], adapter)
         ctx.logger.info(`llm-opendesign-go: route "${PROVIDER_ID}" registered as ${DISPLAY_NAME}`)
+        publishDiagnostics(configured, triedRef)
       } catch (error: unknown) {
         ctx.logger.error(`llm-opendesign-go: not registering "${PROVIDER_ID}" (${String(error)})`)
+        publishDiagnostics(configured, triedRef, String(error))
       }
       return
     }
@@ -265,7 +293,10 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       registration()
       registration = undefined
       if (!enabled) ctx.logger.info('llm-opendesign-go: disabled by configuration; the route is withdrawn')
+      publishDiagnostics(configured, triedRef)
+      return
     }
+    publishDiagnostics(configured, triedRef)
   }
 
   const syncRoute = (): void => {
@@ -280,13 +311,13 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     void resolveApiKey(anyRef)
       .then((key) => {
         if (check !== routeCheck) return
-        applyRoute(key !== undefined)
+        applyRoute(key !== undefined, anyRef)
       })
       .catch((error: unknown) => {
         if (check !== routeCheck) return
         if (error instanceof LlmError && error.code === 'INVALID_CREDENTIAL') {
           ctx.logger.error(`llm-opendesign-go: ${error.message}`)
-          applyRoute(false)
+          applyRoute(false, anyRef)
           return
         }
         ctx.logger.error(`llm-opendesign-go: credential resolution failed; keeping the previous route state (${String(error)})`)

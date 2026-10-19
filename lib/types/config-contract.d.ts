@@ -90,6 +90,8 @@ export interface OpenDesignConfig {
      * reused, so no credential is typed or stored here.
      */
     readonly useVelaCredential: boolean;
+    /** Serialized route diagnostics, written by the host for the page. */
+    readonly diagnosticsJson: string;
     /** Inference base URL without a trailing slash. */
     readonly baseURL: string;
     /** Deadline for one dispatch, spanning discovery through streaming. */

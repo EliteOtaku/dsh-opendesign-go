@@ -138,7 +138,7 @@ export function QuotaCard({ snapshot, loading }: {
       <div style={card}>
         <div style={{ fontSize: '14px', fontWeight: 500 }}>订阅额度</div>
         <p style={hint}>
-          未配置控制台会话凭据，因此无法显示真实额度。额度接口不以 API Key 鉴权，需要一份控制台会话凭据才能读取。
+          尚未读取。勾选下方「使用本机 OpenDesign 的登录凭证」后即可显示真实的 5 小时 / 7 天额度。
         </p>
       </div>
     )

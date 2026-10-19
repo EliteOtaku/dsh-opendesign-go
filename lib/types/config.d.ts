@@ -83,6 +83,10 @@ export interface LiveConfig {
     readonly useVelaCredential: {
         get(): boolean;
     };
+    /** Serialized route diagnostics. */
+    readonly diagnosticsJson: {
+        get(): string;
+    };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {
         get(): string;
