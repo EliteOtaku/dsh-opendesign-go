@@ -24,20 +24,27 @@ import type { OpenDesignSectionInjected } from './Section.tsx'
  * settings shell, whose activation order is not constrained, so registration
  * waits through `slots.inject`.
  */
-export const inject = ['slots', 'configForms']
+export const inject = ['slots']
 
 /**
  * Register the settings page for one client mount.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const form = ctx.configForms.get<OpenDesignConfig>(PROFILE_ENTRY_ID)
-  const injected = (): OpenDesignSectionInjected => ({ form })
-  ctx.effect(() => ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: PROFILE_ENTRY_ID,
-    order: 20,
-    label: () => DISPLAY_NAME,
-    inject: injected,
-  }, OpenDesignSection)))
+  // The settings transport is mounted by the shell's settings plugin, whose
+  // activation order relative to this one is not constrained. Reading
+  // `configForms` eagerly can bind the form to a fiber that never receives the
+  // describe mirror, leaving the page on "loading" forever, so the page is
+  // registered only once the transport exists.
+  ctx.inject(['configForms'], (ready) => {
+    const form = ready.configForms.get<OpenDesignConfig>(PROFILE_ENTRY_ID)
+    const injected = (): OpenDesignSectionInjected => ({ form })
+    ready.effect(() => ready.slots.inject('settings.section', () => ready.slots.register({
+      name: 'settings.section',
+      id: PROFILE_ENTRY_ID,
+      order: 20,
+      label: () => DISPLAY_NAME,
+      inject: injected,
+    }, OpenDesignSection)))
+  })
 }

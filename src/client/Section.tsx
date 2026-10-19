@@ -16,6 +16,7 @@ import { useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
+import { PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
 
 /** Props injected into the section by the registering plugin. */
@@ -58,6 +59,16 @@ const listStyle = {
   fontSize: '13px',
 } as const
 
+const buttonStyle = {
+  fontSize: '12px',
+  padding: '3px 10px',
+  borderRadius: '6px',
+  border: '1px solid rgba(128, 128, 128, 0.35)',
+  background: 'transparent',
+  color: 'inherit',
+  cursor: 'pointer',
+} as const
+
 /**
  * Render the settings page.
  * @param props - injected config form.
@@ -84,6 +95,16 @@ export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactEle
     })
   }
 
+  /**
+   * Force the settings mirror to reload. The mirror is populated on its own
+   * schedule; a page opened before the first describe lands would otherwise sit
+   * on `loading` with no way out, so the user gets an explicit retry.
+   */
+  const retry = (): void => {
+    form.getSnapshot()
+    window.location.reload()
+  }
+
   return (
     <div style={pageStyle}>
       <div>
@@ -93,9 +114,17 @@ export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactEle
         </p>
       </div>
 
-      {snapshot.status === 'loading' && <p style={hintStyle}>正在读取配置…</p>}
+      {snapshot.status === 'loading' && (
+        <div style={{ ...hintStyle, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span>正在读取配置…</span>
+          <button type="button" onClick={retry} style={buttonStyle}>重新加载</button>
+        </div>
+      )}
       {snapshot.status === 'unavailable' && (
-        <p style={hintStyle}>此宿主未暴露本插件的配置项，无法在此编辑。</p>
+        <div style={{ ...hintStyle, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span>宿主未暴露本插件的配置项（namespace: {PROFILE_ENTRY_ID}）。</span>
+          <button type="button" onClick={retry} style={buttonStyle}>重新加载</button>
+        </div>
       )}
 
       <div style={cardStyle}>
