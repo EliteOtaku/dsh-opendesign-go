@@ -131,6 +131,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
           error: '未找到 OpenDesign 桌面端的 vela 命令行；安装并登录 OpenDesign 后即可自动读取',
         }
       } else {
+        ctx.logger.info(`llm-opendesign-go: reading quota via vela (${vela.via}) ${vela.path}`)
         snapshot = await readVelaUsage(vela.path, config.workspaceId)
       }
     } else {

@@ -6,15 +6,16 @@ import type { UsageSnapshot } from './usage-contract.ts';
  */
 export declare function velaWhoami(binary: string): Promise<string | undefined>;
 /**
- * List the workspaces this login can read.
+ * Resolve the workspace this login belongs to.
  *
- * `funding-check` needs a workspace id, so one is discovered rather than typed.
- * The CLI has no dedicated list command, so the id is taken from the wallet
- * snapshot of the workspace the app itself uses — reported by `vela billing
- * summary` indirectly, or from an explicit override.
+ * `funding-check` requires a workspace id, and the user has no obvious place to
+ * find one: the OpenDesign console presents no "workspace" concept in its
+ * navigation at all. So it is discovered instead. `team-projects list` answers
+ * the *current* workspace without being told which one, which makes it the only
+ * command that exposes the id — `billing summary` does not carry it.
  * @param binary - absolute path to the executable.
  * @param explicit - a workspace id from configuration, when present.
- * @returns the workspace id, or undefined when none could be determined.
+ * @returns the id, or undefined when the CLI could not report one.
  */
 export declare function resolveWorkspaceId(binary: string, explicit: string | undefined): Promise<string | undefined>;
 /**

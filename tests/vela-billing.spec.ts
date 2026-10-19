@@ -32,11 +32,20 @@ describe('readVelaUsage', () => {
 })
 
 describe('resolveWorkspaceId', () => {
-  it('prefers an explicit id without calling the CLI', async () => {
+  it('prefers a plausible explicit id without calling the CLI', async () => {
     const { resolveWorkspaceId } = await import('../src/vela-billing.ts')
     // A missing binary would make any CLI call fail; returning the explicit id
     // proves the call is skipped.
-    expect(await resolveWorkspaceId('/definitely/not/here/vela', ' ws-explicit ')).toBe('ws-explicit')
+    expect(await resolveWorkspaceId('/definitely/not/here/vela', ' t7jg9xed43n5kuw6oq23n2xn '))
+      .toBe('t7jg9xed43n5kuw6oq23n2xn')
+  })
+
+  it('ignores a value that cannot be a workspace id instead of failing on it', async () => {
+    const { resolveWorkspaceId } = await import('../src/vela-billing.ts')
+    // The field is free text and has held values like "test". Passing that to
+    // the CLI guarantees a failure that reads like a login problem, while the
+    // real workspace was discoverable all along.
+    expect(await resolveWorkspaceId('/definitely/not/here/vela', 'test')).toBeUndefined()
   })
 
   it('returns undefined rather than guessing when the CLI cannot answer', async () => {

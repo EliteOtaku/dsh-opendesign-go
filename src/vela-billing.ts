@@ -93,23 +93,33 @@ export async function velaWhoami(binary: string): Promise<string | undefined> {
 }
 
 /**
- * List the workspaces this login can read.
+ * Whether a configured value can be a workspace id.
  *
- * `funding-check` needs a workspace id, so one is discovered rather than typed.
- * The CLI has no dedicated list command, so the id is taken from the wallet
- * snapshot of the workspace the app itself uses — reported by `vela billing
- * summary` indirectly, or from an explicit override.
+ * The field is free text and has held things like `test`, so an obviously wrong
+ * value must not shadow discovery: passing it to the CLI guarantees a failure
+ * that looks like a login problem. Real ids are 24 lowercase alphanumerics.
+ * @param value - candidate from configuration.
+ * @returns true when it is plausible enough to try.
+ */
+function looksLikeWorkspaceId(value: string | undefined): value is string {
+  return value !== undefined && /^[a-z0-9]{16,32}$/.test(value.trim())
+}
+
+/**
+ * Resolve the workspace this login belongs to.
+ *
+ * `funding-check` requires a workspace id, and the user has no obvious place to
+ * find one: the OpenDesign console presents no "workspace" concept in its
+ * navigation at all. So it is discovered instead. `team-projects list` answers
+ * the *current* workspace without being told which one, which makes it the only
+ * command that exposes the id — `billing summary` does not carry it.
  * @param binary - absolute path to the executable.
  * @param explicit - a workspace id from configuration, when present.
- * @returns the workspace id, or undefined when none could be determined.
+ * @returns the id, or undefined when the CLI could not report one.
  */
 export async function resolveWorkspaceId(binary: string, explicit: string | undefined): Promise<string | undefined> {
-  if (explicit !== undefined && explicit.trim().length > 0) return explicit.trim()
+  if (looksLikeWorkspaceId(explicit)) return explicit.trim()
   try {
-    // `team-projects list` answers the *current* workspace without being told
-    // which one, which is the only command that exposes it. `billing summary`
-    // does not carry the id, and the console has no visible "workspace" concept
-    // for a user to copy from.
     const raw = await runJson(binary, ['team-projects', 'list'])
     const workspace = (raw as { workspaceId?: unknown }).workspaceId
     if (typeof workspace === 'string' && workspace.length > 0) return workspace
@@ -159,7 +169,12 @@ export async function readVelaUsage(binary: string, workspaceId: string | undefi
 
   const workspace = await resolveWorkspaceId(binary, workspaceId)
   if (workspace === undefined) {
-    return empty('无法确定工作空间 ID；请在设置中填写，或先登录 OpenDesign 桌面端')
+    // Say what was actually tried: "check your settings" sends the user looking
+    // for a field the console does not even expose.
+    return empty(
+      '未能从 vela 取得工作空间 ID。请确认已在 OpenDesign 桌面端登录；'
+      + '也可在下方手动填写工作空间 ID 覆盖自动探测。',
+    )
   }
 
   let funding: FundingCheck
