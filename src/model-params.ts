@@ -45,24 +45,34 @@ export interface ModelParamOverride {
  * they keep V4.1-Flash's limits.
  */
 export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
-  // Anthropic publishes a 200K window for Haiku; the gateway advertises 1M and
-  // accepts it, so the effective window is the gateway's.
+  // platform.claude.com/docs/en/models/haiku-5-5/overview (redirects to
+  // anthropic.com). The endpoint itself reports "maximum context length is
+  // 1000000 tokens" when overflowed, which confirms it independently.
   'claude-haiku-5.5': { contextWindow: 1_000_000, maxTokens: 64_000, inputModalities: ['text', 'image'] },
-  // Retired ids, still routed to V4.1-Flash (DeepSeek docs, footnote 1).
+  // api-docs.deepseek.com/zh-cn/quick_start/pricing: 1M context, 384K output.
+  // The two retired ids route to V4.1-Flash per that page's footnote 1.
   'deepseek-v4-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'] },
   'deepseek-v4-flash-vision-exp': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'] },
   'deepseek-v4-pro': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'] },
   'deepseek-v4.1-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'] },
-  'glm-5.3-flash': { contextWindow: 1_048_000, maxTokens: 32_000, inputModalities: ['text', 'image'] },
-  'glm-5.3-flashx': { contextWindow: 1_000_000, maxTokens: 32_000, inputModalities: ['text', 'image'] },
+  // docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash and its English mirror
+  // docs.z.ai/guides/vlm/glm-5.3-flash both state 1M context, 128K max output.
+  'glm-5.3-flash': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
+  'glm-5.3-flashx': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
+  // No published spec reached; the endpoint accepted a 1.5M-token prompt, so
+  // the window is at least that. Kept at the largest verified-advertised value
+  // rather than inventing a bigger one.
   'gpt-6-luna': { contextWindow: 1_050_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
-  'hy4-preview': { contextWindow: 1_048_000, maxTokens: 32_000, inputModalities: ['text'] },
-  'kimi-k2.7-code': { contextWindow: 262_000, maxTokens: 32_000, inputModalities: ['text', 'image'] },
-  'mimo-v2.6-flash': { contextWindow: 1_048_000, maxTokens: 32_000, inputModalities: ['text', 'image'] },
-  'mimo-v2.6-pro': { contextWindow: 1_048_000, maxTokens: 32_000, inputModalities: ['text', 'image'] },
+  // tencentcloud.com/techpedia/148044: 1M context, 960K max input, 64K output.
+  'hy4-preview': { contextWindow: 1_000_000, maxTokens: 64_000, inputModalities: ['text'] },
+  // platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart: 256K context, and
+  // the endpoint reports "Range of max_tokens should be [1, 262144]".
+  'kimi-k2.7-code': { contextWindow: 262_144, maxTokens: 262_144, inputModalities: ['text', 'image'] },
+  // mimo.mi.com/docs/zh-CN/quick-start/summary/model: 1M context, 128K output.
+  'mimo-v2.6-flash': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
+  'mimo-v2.6-pro': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
 }
 
-/** Sanity bounds, so a hand-edited config cannot produce a nonsensical request. */
 export const MIN_CONTEXT_WINDOW = 1_000
 export const MAX_CONTEXT_WINDOW = 10_000_000
 export const MIN_MAX_TOKENS = 1

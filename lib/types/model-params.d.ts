@@ -42,7 +42,6 @@ export interface ModelParamOverride {
  * they keep V4.1-Flash's limits.
  */
 export declare const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>>;
-/** Sanity bounds, so a hand-edited config cannot produce a nonsensical request. */
 export declare const MIN_CONTEXT_WINDOW = 1000;
 export declare const MAX_CONTEXT_WINDOW = 10000000;
 export declare const MIN_MAX_TOKENS = 1;
