@@ -45,10 +45,10 @@ export interface ModelParamOverride {
  * they keep V4.1-Flash's limits.
  */
 export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
-  // platform.claude.com/docs/en/models/haiku-5-5/overview (redirects to
-  // anthropic.com). The endpoint itself reports "maximum context length is
-  // 1000000 tokens" when overflowed, which confirms it independently.
-  'claude-haiku-5.5': { contextWindow: 1_000_000, maxTokens: 64_000, inputModalities: ['text', 'image'] },
+  // Anthropic: 1M context (widened from the earlier 200K) and 128K max output.
+  // The context figure is independently confirmed: overflowing the endpoint
+  // reports "maximum context length is 1000000 tokens".
+  'claude-haiku-5.5': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
   // api-docs.deepseek.com/zh-cn/quick_start/pricing: 1M context, 384K output.
   // The two retired ids route to V4.1-Flash per that page's footnote 1.
   'deepseek-v4-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'] },
@@ -59,9 +59,11 @@ export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
   // docs.z.ai/guides/vlm/glm-5.3-flash both state 1M context, 128K max output.
   'glm-5.3-flash': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
   'glm-5.3-flashx': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
-  // No published spec reached; the endpoint accepted a 1.5M-token prompt, so
-  // the window is at least that. Kept at the largest verified-advertised value
-  // rather than inventing a bigger one.
+  // OpenAI: 1,050,000 total context, 922,000 max input, 128,000 max output.
+  // The three figures are consistent — 922000 + 128000 = 1050000 — which is the
+  // same shape as Hy4 Preview's 960000 + 64000. Note that a 1.5M-token prompt
+  // was accepted without an error, so the endpoint does not enforce this bound
+  // itself; the documented limit is the one used here.
   'gpt-6-luna': { contextWindow: 1_050_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
   // tencentcloud.com/techpedia/148044: 1M context, 960K max input, 64K output.
   'hy4-preview': { contextWindow: 1_000_000, maxTokens: 64_000, inputModalities: ['text'] },

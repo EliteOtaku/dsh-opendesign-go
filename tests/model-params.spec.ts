@@ -37,6 +37,28 @@ describe('gateway model defaults', () => {
     expect(MODEL_DEFAULTS['deepseek-v4-flash-vision-exp']?.maxTokens).toBe(384_000)
   })
 
+  it('matches the published output limit for each vendor', () => {
+    // These were all wrong once: the gateway's metadata.output_budget said
+    // 32000 for several models whose vendors publish 128K, understating the cap
+    // by 4x. Pinned here so re-reading the gateway cannot regress them.
+    expect(MODEL_DEFAULTS['glm-5.3-flash']?.maxTokens).toBe(128_000)
+    expect(MODEL_DEFAULTS['glm-5.3-flashx']?.maxTokens).toBe(128_000)
+    expect(MODEL_DEFAULTS['mimo-v2.6-flash']?.maxTokens).toBe(128_000)
+    expect(MODEL_DEFAULTS['mimo-v2.6-pro']?.maxTokens).toBe(128_000)
+    expect(MODEL_DEFAULTS['claude-haiku-5.5']?.maxTokens).toBe(128_000)
+    expect(MODEL_DEFAULTS['gpt-6-luna']?.maxTokens).toBe(128_000)
+    expect(MODEL_DEFAULTS['hy4-preview']?.maxTokens).toBe(64_000)
+    expect(MODEL_DEFAULTS['kimi-k2.7-code']?.maxTokens).toBe(262_144)
+  })
+
+  it('uses the exact 256K context Kimi reports, not a rounded value', () => {
+    // The endpoint states "Range of max_tokens should be [1, 262144]"; 262144 is
+    // 256x1024, while the gateway's 262000 is a rounded readback.
+    expect(MODEL_DEFAULTS['kimi-k2.7-code']?.contextWindow).toBe(262_144)
+    expect(MODEL_DEFAULTS['claude-haiku-5.5']?.contextWindow).toBe(1_000_000)
+    expect(MODEL_DEFAULTS['gpt-6-luna']?.contextWindow).toBe(1_050_000)
+  })
+
   it('declares image input only where the gateway reports it', () => {
     expect(MODEL_DEFAULTS['deepseek-v4.1-flash']?.inputModalities).toContain('image')
     expect(MODEL_DEFAULTS['deepseek-v4-flash']?.inputModalities).toEqual(['text'])
