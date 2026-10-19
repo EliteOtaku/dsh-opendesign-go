@@ -62,7 +62,7 @@ function money(usd: number): string {
  * @returns the card.
  */
 export function UsageCard({ report }: { readonly report: UsageReport | undefined }): ReactElement {
-  if (report === undefined || report.calls === 0) {
+  if (report === undefined || (report.calls === 0 && report.recovered === undefined)) {
     return (
       <div style={card}>
         <div style={{ fontSize: '14px', fontWeight: 500 }}>本地用量</div>
@@ -82,6 +82,27 @@ export function UsageCard({ report }: { readonly report: UsageReport | undefined
           {report.calls} 次请求 · 估算 {money(report.costUsd)}
         </span>
       </div>
+
+      {report.recovered !== undefined && report.recovered.calls > 0 && (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '2px',
+          fontSize: '11px',
+          opacity: 0.6,
+          borderTop: '1px solid rgba(128,128,128,0.18)',
+          paddingTop: '8px',
+        }}>
+          <div>
+            另有 {report.recovered.calls} 次历史调用（{money(report.recovered.costUsd)}）
+            未经过本插件，从会话日志补算。
+          </div>
+          <div style={{ opacity: 0.85 }}>
+            这些是插件做出来之前，用 DSH 自定义模型直连 OpenDesign 的消耗；
+            缓存读 {Math.round(report.recovered.cacheReadTokens / 1000)}k token 已计入。
+          </div>
+        </div>
+      )}
 
       <div style={{ ...rowStyle, borderTop: 'none', opacity: 0.55, paddingBottom: 0 }}>
         <span>模型</span>

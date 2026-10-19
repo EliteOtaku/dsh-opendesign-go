@@ -82,6 +82,21 @@ export interface UsageReport {
      * page must say so instead of presenting the number as a bill.
      */
     readonly pricedAs: 'base-tier';
+    /**
+     * Calls recovered from session logs that this plugin did not serve.
+     *
+     * Traffic sent through a plain provider entry — the custom-model route
+     * pointing at the same endpoint — never passes this adapter, so it cannot be
+     * metered live. It is recovered from the harness session logs and reported
+     * separately rather than folded into `calls`: the two totals answer different
+     * questions, and a merged number could not be audited.
+     */
+    readonly recovered?: {
+        readonly calls: number;
+        readonly costUsd: number;
+        readonly unpricedCalls: number;
+        readonly cacheReadTokens: number;
+    };
 }
 /**
  * Cost of one call under a model's base price tier.

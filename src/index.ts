@@ -32,6 +32,8 @@ import { locateVela } from './vela-locate.ts'
 import { readVelaUsage } from './vela-billing.ts'
 import type { RouteDiagnostics } from './diagnostics.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { join } from 'node:path'
+import { scanSessions } from './session-usage.ts'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
@@ -211,6 +213,45 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   // list. It needs no credential and covers the question a user can act on —
   // which model on which key is spending what.
   const ledger = new LedgerStore(LedgerStore.pathIn(resolveDshHome()))
+
+  /**
+   * Spend from session logs that never passed this adapter.
+   *
+   * Computed once and cached: it walks every session log on disk (12 files and
+   * several hundred megabytes of decompressed JSONL on this machine), so doing
+   * it per report write would stall every request. History does not change
+   * while the process runs — new calls are metered live — so one pass is enough.
+   */
+  let recoveredCache: { calls: number, costUsd: number, unpricedCalls: number, cacheReadTokens: number } | undefined
+  const recoveredSpend = (): typeof recoveredCache => {
+    if (recoveredCache !== undefined) return recoveredCache
+    let calls = 0
+    let costUsd = 0
+    let unpricedCalls = 0
+    let cacheReadTokens = 0
+    try {
+      for (const call of scanSessions(join(resolveDshHome(), 'sessions'))) {
+        const price = priceOf(call.model)
+        if (price === undefined) {
+          unpricedCalls += 1
+          continue
+        }
+        calls += 1
+        cacheReadTokens += call.cacheReadTokens
+        costUsd += (call.inputTokens * price.input
+          + call.outputTokens * price.output
+          + call.cacheReadTokens * (price.cacheRead ?? price.input)) / 1_000_000
+      }
+    } catch (error) {
+      ctx.logger.warn(`llm-opendesign-go: session history scan failed (${String(error)})`)
+      return undefined
+    }
+    // Only cache a real result: caching an empty scan would hide history that a
+    // later fix could recover.
+    recoveredCache = { calls, costUsd, unpricedCalls, cacheReadTokens }
+    return recoveredCache
+  }
+
   /** Recompute the report and publish it, debounced to one write per burst. */
   let pendingReport: ReturnType<typeof setTimeout> | undefined
   const publishReport = (): void => {
@@ -220,7 +261,9 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       const write = fieldWriterOf(ctx)
       if (write === undefined) return
       const now = Date.now()
-      const report = summarize(ledger.all(), now - REPORT_WINDOW_MS, now)
+      const base = summarize(ledger.all(), now - REPORT_WINDOW_MS, now)
+      const recovered = recoveredSpend()
+      const report = recovered === undefined ? base : { ...base, recovered }
       void write('reportJson', JSON.stringify(report)).catch(() => undefined)
     }, 1_000)
   }
