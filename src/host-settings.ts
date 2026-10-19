@@ -39,19 +39,41 @@ export function installHostSettings(ctx: Context): void {
     }
     settingsCtx.effect(() => {
       const dispose = settings.configure!({ auto: false }, ctx.fiber)
-      // Prove the policy landed: without this line a page that never receives a
-      // describe mirror is indistinguishable from a page whose transport is
-      // merely slow.
+      // Report exactly what the host sees: whether this entry reached a form at
+      // all, and which namespaces did. A page receiving no mirror is otherwise
+      // indistinguishable from a plugin that failed to activate.
       const writable = (settings as { writable?: boolean }).writable
-      const entries = typeof (settings as { describe?: unknown }).describe === 'function'
-        ? (settings as { describe(options?: unknown): { ns: string }[] }).describe()
-          .map((row) => row.ns)
-        : []
+      const describe = (settings as { describe?: (options?: unknown) => { ns: string, autoGenerate: boolean }[] }).describe
+      const rows = typeof describe === 'function' ? describe.call(settings) : []
+      const own = rows.find((row) => row.ns === PROFILE_ENTRY_ID)
       ctx.logger.info(
-        `llm-opendesign-go: settings attached (writable=${String(writable)}, entry "${PROFILE_ENTRY_ID}" `
-        + `${entries.includes(PROFILE_ENTRY_ID) ? 'present' : 'ABSENT'} among ${entries.length} forms)`,
+        `llm-opendesign-go: settings attached (writable=${String(writable)}, forms=${rows.length}, `
+        + `own=${own === undefined ? 'ABSENT' : `present(auto=${String(own.autoGenerate)})`}, `
+        + `ns=[${rows.map((row) => row.ns).join(', ')}])`,
       )
       return dispose
     })
   })
+}
+
+/**
+ * Expose the host's current settings projection so the page can report why it
+ * sees no form. Kept separate from {@link installHostSettings} so a host
+ * without the modern service still answers with an empty list rather than
+ * throwing during activation.
+ * @param ctx - host context that may carry a settings service.
+ * @returns a reader returning every namespace the host currently exposes.
+ */
+export function describeNamespacesOf(ctx: Context): () => string[] {
+  return () => {
+    const settings = ctx.get('settings') as
+      | { describe?: (options?: unknown) => { ns: string }[] }
+      | undefined
+    if (settings === undefined || typeof settings.describe !== 'function') return []
+    try {
+      return settings.describe().map((row) => row.ns)
+    } catch {
+      return []
+    }
+  }
 }

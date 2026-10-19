@@ -19,3 +19,12 @@ import type { Context } from '@deepseek-ai/cordis';
  * @param ctx - host context that may carry a settings service.
  */
 export declare function installHostSettings(ctx: Context): void;
+/**
+ * Expose the host's current settings projection so the page can report why it
+ * sees no form. Kept separate from {@link installHostSettings} so a host
+ * without the modern service still answers with an empty list rather than
+ * throwing during activation.
+ * @param ctx - host context that may carry a settings service.
+ * @returns a reader returning every namespace the host currently exposes.
+ */
+export declare function describeNamespacesOf(ctx: Context): () => string[];

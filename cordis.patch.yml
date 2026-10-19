@@ -1,3 +1,16 @@
 - insert:
     - id: opendesign-go
       name: dsh-opendesign-go
+      # Declared so the entry carries a config document from the first boot. An
+      # entry with no config has no user layer, and the settings service then has
+      # nothing to project into an editable form.
+      config:
+        enabled: true
+        apiKeyEnv: OPENDESIGN_API_KEY
+        accounts: []
+        autoSwitch: false
+        sessionRef: ''
+        workspaceId: ''
+        baseURL: https://amr-link.open-design.ai/v1
+        requestTimeoutMs: 1800000
+        streamIdleTimeoutMs: 300000
