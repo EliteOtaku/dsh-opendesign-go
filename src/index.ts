@@ -26,6 +26,8 @@ import type { OpenDesignConfig } from './config-contract.ts'
 import { listSeedModels } from './catalog.ts'
 import { accountsOf, assertAccounts } from './accounts.ts'
 import { LedgerStore } from './ledger-store.ts'
+import { AccountService } from './account-service.ts'
+import { ACCOUNTS_NAMESPACE, accountsRemote } from './remote-contract.ts'
 import { costOf, summarize } from './usage-ledger.ts'
 import { priceOf } from './pricing.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -139,6 +141,15 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       refreshIfConfigured()
     }, 5_000)
     return () => { clearInterval(timer) }
+  })
+
+  // Account mutations, including the one write that carries a secret. Published
+  // as a service so the Remote descriptor's `service` key resolves to it.
+  const accounts = new AccountService(ctx, current)
+  ctx.provide(ACCOUNTS_NAMESPACE)
+  ctx.set(ACCOUNTS_NAMESPACE, accounts)
+  ctx.inject(['typert'], (scope) => {
+    scope.effect(() => scope.typert.remotes.register(accountsRemote))
   })
 
   // Local usage ledger: every request this plugin serves, priced with the public

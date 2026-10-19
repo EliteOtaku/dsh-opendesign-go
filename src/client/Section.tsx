@@ -23,11 +23,14 @@ import { parseReport, parseUsage } from '../usage-contract.ts'
 import { QuotaCard } from './QuotaCard.tsx'
 import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
+import type { ExecuteAccountCommand } from './accounts-controller.ts'
 
 /** Props injected into the section by the registering plugin. */
 export interface OpenDesignSectionInjected {
   /** Live config form bound to this plugin's profile entry. */
   readonly form: ConfigForm<OpenDesignConfig>
+  /** Sends account mutations to the host, which owns credential storage. */
+  readonly execute: ExecuteAccountCommand
 }
 
 const pageStyle = {
@@ -92,7 +95,7 @@ const inputStyle = {
  * @param props - injected config form and optional quota reader.
  * @returns the page body.
  */
-export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactElement {
+export function OpenDesignSection({ form, execute }: OpenDesignSectionInjected): ReactElement {
   const snapshot = useSyncExternalStore(
     (listener) => form.subscribe(listener),
     () => form.getSnapshot(),
@@ -187,7 +190,7 @@ export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactEle
         </div>
       </div>
 
-      <AccountsCard form={form} config={value} editable={editable} />
+      <AccountsCard form={form} config={value} editable={editable} execute={execute} />
 
       <UsageCard report={report} />
 

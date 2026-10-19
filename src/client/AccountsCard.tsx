@@ -5,19 +5,19 @@
  * "select" is expressed as "move to front" rather than a separate field — there
  * is no second place for the selection to disagree with the list.
  *
- * Keys are never displayed or echoed back: adding an account writes a credential
- * reference plus a name, and the value itself is stored by the host credentials
- * service. This card therefore shows only whether a reference is *configured*,
- * which the host reports separately.
+ * Keys are entered here but never shown again: the field sends a command to the
+ * host, which stores the value in the credentials service and keeps only a
+ * reference in the config. Nothing in this card can read a stored key back.
  *
  * @module dsh-opendesign-go/client/AccountsCard
  */
 import { useState } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { MAX_ACCOUNTS, accountsOf, deriveAccountRef } from '../accounts.ts'
+import { MAX_ACCOUNTS, accountsOf } from '../accounts.ts'
 import type { OpenDesignAccount } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
+import type { ExecuteAccountCommand } from './accounts-controller.ts'
 
 const card = {
   border: '1px solid rgba(128, 128, 128, 0.25)',
@@ -54,19 +54,33 @@ const input = {
   boxSizing: 'border-box',
 } as const
 
+/** Turn one command outcome into what the card says. */
+function outcomeMessage(result: 'applied' | 'rejected' | 'unknown'): string | undefined {
+  if (result === 'applied') return undefined
+  if (result === 'rejected') return '宿主拒绝了这次修改，请检查填写内容'
+  return '未能确认写入结果：通道可能未就绪，请刷新后核对账号列表'
+}
+
 /**
  * Render the account card.
- * @param props - config form, current accounts, and the write helper.
+ * @param props - config form, current accounts, and the command executor.
  * @returns the card.
  */
-export function AccountsCard({ form, config, editable }: {
+export function AccountsCard({ form, config, editable, execute }: {
   readonly form: ConfigForm<OpenDesignConfig>
   readonly config: OpenDesignConfig | undefined
   readonly editable: boolean
+  /** Sends an account command to the host, which owns credential storage. */
+  readonly execute: ExecuteAccountCommand
 }): ReactElement {
   const [adding, setAdding] = useState(false)
+  const [replacing, setReplacing] = useState<string | undefined>(undefined)
   const [draftName, setDraftName] = useState('')
+  const [draftKey, setDraftKey] = useState('')
+  const [draftWorkspace, setDraftWorkspace] = useState('')
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
+  const [notice, setNotice] = useState<string | undefined>(undefined)
 
   const accounts = accountsOf({
     apiKeyEnv: config?.apiKeyEnv ?? '',
@@ -75,46 +89,78 @@ export function AccountsCard({ form, config, editable }: {
   const atCap = accounts.length >= MAX_ACCOUNTS
 
   /**
-   * Persist one new list. The host validates it, so a refusal is surfaced
-   * instead of being lost.
-   * @param next - the complete next account list.
-   * @param selectedRef - reference that becomes the active account.
+   * Run one command and surface its outcome.
+   * @param command - the command to send.
+   * @param onApplied - runs only when the host confirmed the write.
    */
-  const commit = (next: readonly OpenDesignAccount[], selectedRef: string): void => {
+  const run = (command: Parameters<ExecuteAccountCommand>[0], onApplied?: () => void): void => {
     setError(undefined)
-    void form.mutate([
-      { op: 'set', path: ['accounts'], value: next.map((account) => ({ ...account })) },
-      { op: 'set', path: ['apiKeyEnv'], value: selectedRef },
-    ]).then((accepted) => {
-      if (accepted === false) setError('宿主拒绝了这次修改，请检查账号信息')
-    }).catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : String(reason))
-    })
+    setNotice(undefined)
+    setBusy(true)
+    void execute(command)
+      .then((result) => {
+        const message = outcomeMessage(result)
+        if (message === undefined) {
+          onApplied?.()
+          return
+        }
+        setError(message)
+      })
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : String(reason))
+      })
+      .finally(() => { setBusy(false) })
   }
 
   /**
-   * Add an account with a derived credential reference.
+   * Add an account and store its key.
    *
-   * A derived reference keeps the user out of environment-variable naming,
-   * where a typo would surface much later as a failed request.
+   * The host derives the credential reference, so the user never types an
+   * environment-variable name.
    */
   const add = (): void => {
     const name = draftName.trim()
+    const key = draftKey.trim()
     if (name.length === 0) {
       setError('请输入账号名称')
       return
     }
-    const used = new Set(accounts.map((account) => account.apiKeyEnv))
-    let index = 0
-    while (used.has(deriveAccountRef(index))) index += 1
-    const account: OpenDesignAccount = {
+    if (key.length === 0) {
+      setError('请输入 API Key')
+      return
+    }
+    const workspace = draftWorkspace.trim()
+    run({
+      kind: 'add',
+      // A stable id makes a retried submission idempotent on the host.
       id: crypto.randomUUID(),
       name,
-      apiKeyEnv: deriveAccountRef(index),
+      key,
+      ...(workspace.length === 0 ? {} : { workspaceId: workspace }),
+    }, () => {
+      setDraftName('')
+      setDraftKey('')
+      setDraftWorkspace('')
+      setAdding(false)
+      setNotice('已添加账号，请确认已保存')
+    })
+  }
+
+  /**
+   * Store a new key for one existing account.
+   * @param ref - the account's credential reference.
+   */
+  const replaceKey = (ref: string): void => {
+    const key = draftKey.trim()
+    if (key.length === 0) {
+      setError('请输入新的 API Key')
+      return
     }
-    commit([...accounts, account], accounts[0]?.apiKeyEnv ?? account.apiKeyEnv)
-    setDraftName('')
-    setAdding(false)
+    run({ kind: 'replace-key', ref, key }, () => {
+      setDraftKey('')
+      setReplacing(undefined)
+      setNotice('已更新 Key')
+    })
   }
 
   /**
@@ -123,14 +169,7 @@ export function AccountsCard({ form, config, editable }: {
    * @param ref - credential reference of the account to remove.
    */
   const remove = (ref: string): void => {
-    const next = accounts.filter((account) => account.apiKeyEnv !== ref)
-    if (next.length === 0) {
-      setError('至少保留一个账号')
-      return
-    }
-    const selected = next[0]
-    if (selected === undefined) return
-    commit(next, selected.apiKeyEnv)
+    run({ kind: 'remove', ref })
   }
 
   /**
@@ -138,7 +177,7 @@ export function AccountsCard({ form, config, editable }: {
    * @param ref - credential reference to promote.
    */
   const select = (ref: string): void => {
-    commit(accounts, ref)
+    run({ kind: 'select', ref })
   }
 
   return (
@@ -155,37 +194,66 @@ export function AccountsCard({ form, config, editable }: {
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {accounts.map((account, index) => (
+        {accounts.map((account: OpenDesignAccount, index: number) => (
           <div
             key={account.id}
             style={{
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
+              flexDirection: 'column',
+              gap: '8px',
               padding: '8px 10px',
               borderRadius: '8px',
               border: '1px solid rgba(128, 128, 128, 0.2)',
               background: index === 0 ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
             }}
           >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '13px' }}>
-                {account.name || account.apiKeyEnv}
-                {index === 0 && <span style={{ marginLeft: '8px', fontSize: '11px', opacity: 0.6 }}>当前</span>}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '13px' }}>
+                  {account.name || account.apiKeyEnv}
+                  {index === 0 && <span style={{ marginLeft: '8px', fontSize: '11px', opacity: 0.6 }}>当前</span>}
+                </div>
+                <div style={{ fontSize: '11px', opacity: 0.55 }}>{account.apiKeyEnv}</div>
               </div>
-              <div style={{ fontSize: '11px', opacity: 0.55 }}>{account.apiKeyEnv}</div>
-            </div>
-            <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-              {index !== 0 && (
-                <button type="button" disabled={!editable} style={smallButton} onClick={() => { select(account.apiKeyEnv) }}>
-                  设为当前
+              <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                {index !== 0 && (
+                  <button type="button" disabled={!editable || busy} style={smallButton} onClick={() => { select(account.apiKeyEnv) }}>
+                    设为当前
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={!editable || busy}
+                  style={smallButton}
+                  onClick={() => { setReplacing(replacing === account.apiKeyEnv ? undefined : account.apiKeyEnv); setDraftKey(''); setError(undefined) }}
+                >
+                  {replacing === account.apiKeyEnv ? '取消' : '更换 Key'}
                 </button>
-              )}
-              <button type="button" disabled={!editable} style={smallButton} onClick={() => { remove(account.apiKeyEnv) }}>
-                移除
-              </button>
+                <button type="button" disabled={!editable || busy} style={smallButton} onClick={() => { remove(account.apiKeyEnv) }}>
+                  移除
+                </button>
+              </div>
             </div>
+            {replacing === account.apiKeyEnv && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', opacity: 0.7 }}>
+                  新的 API Key
+                  <input
+                    type="password"
+                    value={draftKey}
+                    autoComplete="off"
+                    onChange={(event) => { setDraftKey(event.target.value) }}
+                    placeholder="sk-..."
+                    style={input}
+                  />
+                </label>
+                <div>
+                  <button type="button" disabled={busy} style={smallButton} onClick={() => { replaceKey(account.apiKeyEnv) }}>
+                    保存 Key
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -202,12 +270,41 @@ export function AccountsCard({ form, config, editable }: {
               style={input}
             />
           </label>
+          <label style={{ fontSize: '12px', opacity: 0.7 }}>
+            API Key
+            <input
+              type="password"
+              value={draftKey}
+              autoComplete="off"
+              onChange={(event) => { setDraftKey(event.target.value) }}
+              placeholder="sk-..."
+              style={input}
+            />
+          </label>
+          <label style={{ fontSize: '12px', opacity: 0.7 }}>
+            工作空间 ID（可选，仅用于以后读取额度）
+            <input
+              type="text"
+              value={draftWorkspace}
+              onChange={(event) => { setDraftWorkspace(event.target.value) }}
+              placeholder="workspaceId"
+              style={input}
+            />
+          </label>
           <p style={hint}>
-            Key 请通过宿主凭据服务写入（引用名保存后显示），页面不会读取或回显密钥。
+            Key 由宿主凭据服务保存，页面不会回显已保存的密钥；引用名由插件自动分配。
           </p>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button type="button" style={smallButton} onClick={add}>确认</button>
-            <button type="button" style={smallButton} onClick={() => { setAdding(false); setError(undefined) }}>取消</button>
+            <button type="button" disabled={busy} style={smallButton} onClick={add}>
+              {busy ? '保存中…' : '确认'}
+            </button>
+            <button
+              type="button"
+              style={smallButton}
+              onClick={() => { setAdding(false); setDraftKey(''); setError(undefined) }}
+            >
+              取消
+            </button>
           </div>
         </div>
       ) : (
@@ -216,7 +313,7 @@ export function AccountsCard({ form, config, editable }: {
             type="button"
             disabled={!editable || atCap}
             style={smallButton}
-            onClick={() => { setAdding(true) }}
+            onClick={() => { setAdding(true); setNotice(undefined) }}
           >
             添加账号
           </button>
@@ -224,9 +321,8 @@ export function AccountsCard({ form, config, editable }: {
         </div>
       )}
 
-      {error !== undefined && (
-        <p style={{ ...hint, color: '#e5484d' }}>{error}</p>
-      )}
+      {error !== undefined && <p style={{ ...hint, color: '#e5484d' }}>{error}</p>}
+      {notice !== undefined && <p style={hint}>{notice}</p>}
     </div>
   )
 }

@@ -15,6 +15,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { DISPLAY_NAME, PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
+import { accountCommands } from './accounts-controller.ts'
 import { OpenDesignSection } from './Section.tsx'
 import type { OpenDesignSectionInjected } from './Section.tsx'
 
@@ -24,13 +25,16 @@ import type { OpenDesignSectionInjected } from './Section.tsx'
  * settings shell, whose activation order is not constrained, so registration
  * waits through `slots.inject`.
  */
-export const inject = ['slots']
+export const inject = ['slots', 'remote']
 
 /**
  * Register the settings page for one client mount.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
+  // Account mutations reach the host through one mounted Remote namespace; the
+  // page never touches a credential itself.
+  const commands = accountCommands(ctx)
   // The settings transport is mounted by the shell's settings plugin, whose
   // activation order relative to this one is not constrained. Reading
   // `configForms` eagerly can bind the form to a fiber that never receives the
@@ -38,7 +42,7 @@ export function apply(ctx: ClientContext): void {
   // registered only once the transport exists.
   ctx.inject(['configForms'], (ready) => {
     const form = ready.configForms.get<OpenDesignConfig>(PROFILE_ENTRY_ID)
-    const injected = (): OpenDesignSectionInjected => ({ form })
+    const injected = (): OpenDesignSectionInjected => ({ form, execute: commands.execute })
     ready.effect(() => ready.slots.inject('settings.section', () => ready.slots.register({
       name: 'settings.section',
       id: PROFILE_ENTRY_ID,
