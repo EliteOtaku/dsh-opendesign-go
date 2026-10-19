@@ -12,6 +12,11 @@ export declare const DISPLAY_NAME = "DSH OpenDesign Go";
 /** Settings namespace this plugin installs and the Web page edits. */
 export declare const SETTINGS_NAMESPACE = "llm-opendesign-go";
 /**
+ * Loader row id in `cordis.patch.yml`, and the profile entry the modern
+ * settings surface edits. The client reads this same id through `configForms`.
+ */
+export declare const PROFILE_ENTRY_ID = "opendesign-go";
+/**
  * OpenAI-compatible inference base. Anthropic Messages uses the same host
  * without the `/v1` suffix; the SDK appends `/v1/messages` itself.
  */

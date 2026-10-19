@@ -24,6 +24,7 @@ import type { LiveConfig } from './config.ts'
 import { DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract.ts'
 import type { OpenDesignConfig } from './config-contract.ts'
 import { listSeedModels } from './catalog.ts'
+import { installHostSettings } from './host-settings.ts'
 
 /** Plugin module name; stable, and declared in dsh-plugin.naming.json. */
 export const name = 'llm-opendesign-go'
@@ -57,6 +58,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   assertBaseURL(initial.baseURL)
   assertApiKeyEnv(initial.apiKeyEnv)
   ctx.logger.info('llm-opendesign-go: mounted')
+  installHostSettings(ctx)
 
   /**
    * Resolve the selected account's key through the credentials seam, falling

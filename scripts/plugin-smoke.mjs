@@ -46,7 +46,15 @@ const stub = {
     }
   },
   get: () => undefined,
-  inject: (_deps, callback) => callback({ on: noop, get: () => undefined, logger: stub.logger }),
+  // The child context mirrors a host that has no settings service: the plugin
+  // must degrade to a log line instead of throwing.
+  inject: (_deps, callback) => callback({
+    on: noop,
+    get: () => undefined,
+    logger: stub.logger,
+    effect: stub.effect,
+    settings: undefined,
+  }),
 }
 plugin.apply(stub)
 assert(lines.some((line) => line.includes('llm-opendesign-go')), 'apply did not report through the host logger')

@@ -22,7 +22,7 @@ const outDir = check ? join(root, '.tmp', 'lib-check') : join(root, 'lib')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
 /** Every dependency the host supplies; bundling them would duplicate the host. */
-const external = ['@deepseek-ai/*']
+const external = ['@deepseek-ai/*', 'react', 'react-dom', 'react/jsx-runtime']
 
 /**
  * Recursively list files under a directory, relative and sorted.
@@ -57,11 +57,35 @@ await build({
   logLevel: 'warning',
 })
 
+const clientEntry = join(root, 'src', 'client', 'index.ts')
+if (existsSync(clientEntry)) {
+  await build({
+    entryPoints: [clientEntry],
+    outfile: join(outDir, 'client.js'),
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2022',
+    jsx: 'automatic',
+    external,
+    sourcemap: false,
+    logLevel: 'warning',
+  })
+}
+
 execFileSync(
   process.execPath,
   [join(root, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.host.json', '--outDir', join(outDir, 'types')],
   { cwd: root, stdio: 'inherit' },
 )
+
+if (existsSync(join(root, 'tsconfig.client.json'))) {
+  execFileSync(
+    process.execPath,
+    [join(root, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.client.json', '--outDir', join(outDir, 'types')],
+    { cwd: root, stdio: 'inherit' },
+  )
+}
 
 writeFileSync(
   join(outDir, 'build-info.json'),
