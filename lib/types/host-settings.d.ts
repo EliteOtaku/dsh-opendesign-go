@@ -28,7 +28,16 @@ export declare function installHostSettings(ctx: Context): void;
  * @param ctx - host context that may carry a settings service.
  * @returns a writer, or undefined when this host cannot write settings.
  */
-export declare function usageWriterOf(ctx: Context): ((json: string) => Promise<void>) | undefined;
+/**
+ * Expose a writer for one cached field.
+ *
+ * The page reads these fields from the config mirror, so the host publishes a
+ * value by writing it. Keeping the write here means the plugin never keeps a
+ * second copy of the state: one document, one source of truth.
+ * @param ctx - host context that may carry a settings service.
+ * @returns a writer for a named field, or undefined when this host cannot write.
+ */
+export declare function fieldWriterOf(ctx: Context): ((field: string, json: string) => Promise<void>) | undefined;
 /**
  * Expose the host's current settings projection so the page can report why it
  * sees no form. Kept separate from {@link installHostSettings} so a host

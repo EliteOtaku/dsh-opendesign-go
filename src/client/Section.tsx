@@ -19,8 +19,9 @@ import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
 import { PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
 import type { UsageSnapshot } from '../usage-contract.ts'
-import { parseUsage } from '../usage-contract.ts'
+import { parseReport, parseUsage } from '../usage-contract.ts'
 import { QuotaCard } from './QuotaCard.tsx'
+import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 
 /** Props injected into the section by the registering plugin. */
@@ -104,6 +105,9 @@ export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactEle
   // page already receives; parsing it here needs no second transport and keeps
   // one source of truth.
   const usage = useMemo(() => parseUsage(value?.usageJson), [value?.usageJson])
+  // Local accounting: produced by this plugin's own adapter, so it needs no
+  // console session and is the primary usage surface.
+  const report = useMemo(() => parseReport(value?.reportJson), [value?.reportJson])
   const usageLoading = false
 
   /**
@@ -184,6 +188,8 @@ export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactEle
       </div>
 
       <AccountsCard form={form} config={value} editable={editable} />
+
+      <UsageCard report={report} />
 
       <QuotaCard snapshot={usage} loading={usageLoading} />
 

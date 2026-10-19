@@ -8,6 +8,7 @@
  *
  * @module dsh-opendesign-go/usage-contract
  */
+import type { UsageReport } from './usage-ledger.ts';
 /** How one quota window stands right now. */
 export interface QuotaWindow {
     /** `ok` when the console answered; `unknown` when it could not be read. */
@@ -70,6 +71,16 @@ export declare function creditsToNumber(value: string): number | null;
  * @returns 0–100, or null when the limit is zero or unparseable.
  */
 export declare function percentUsedOf(usedCredits: string, limitCredits: string): number | null;
+/**
+ * Read the cached local usage report.
+ *
+ * The report is produced by this plugin, but it crosses an editable document,
+ * so it is validated the same way a quota reading is: a malformed value means
+ * "no report", never a fabricated one.
+ * @param raw - serialized report, or empty string.
+ * @returns the report, or undefined when absent or unusable.
+ */
+export declare function parseReport(raw: string | undefined): UsageReport | undefined;
 /**
  * Read a cached reading back from the config document.
  *

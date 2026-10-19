@@ -15,7 +15,7 @@
  * @module dsh-opendesign-go/adapter
  */
 import { LlmAdapter } from '@deepseek-ai/dsh-llm';
-import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
+import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
 import { type OpenDesignConfig } from './config-contract.ts';
 /** What one adapter instance reads from the plugin. */
 export interface OpenDesignAdapterOptions {
@@ -35,6 +35,20 @@ export interface OpenDesignAdapterOptions {
      * @param ref - the account that succeeded.
      */
     onAccountSettled?: (ref: string) => void;
+    /**
+     * Report the token usage of one finished call so it can be priced and
+     * recorded.
+     *
+     * Called once per call that produced a usage chunk. A call that failed before
+     * reporting usage costs nothing measurable and is not recorded: counting it
+     * would make the ledger claim spend that never happened.
+     * @param call - the model, the account that served it, and its usage.
+     */
+    onUsage?: (call: {
+        model: string;
+        accountRef: string;
+        usage: TokenUsage;
+    }) => void;
 }
 /**
  * Stream one model call.

@@ -25,7 +25,15 @@ import { DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract
 import type { OpenDesignConfig } from './config-contract.ts'
 import { listSeedModels } from './catalog.ts'
 import { accountsOf, assertAccounts } from './accounts.ts'
-import { installHostSettings, usageWriterOf } from './host-settings.ts'
+import { LedgerStore } from './ledger-store.ts'
+import { costOf, summarize } from './usage-ledger.ts'
+import { priceOf } from './pricing.ts'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import type { TokenUsage } from '@deepseek-ai/dsh-llm'
+
+/** Local usage report window: the trailing 30 days. */
+const REPORT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+import { fieldWriterOf, installHostSettings } from './host-settings.ts'
 import { OpenDesignUsageService, sessionResolverOf } from './usage.ts'
 import { DEFAULT_SESSION_REF } from './config-contract.ts'
 
@@ -101,10 +109,10 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * instead of showing a stale reading with no explanation.
    */
   const refreshUsage = async (): Promise<void> => {
-    const write = usageWriterOf(ctx)
+    const write = fieldWriterOf(ctx)
     if (write === undefined) return
     const snapshot = await usage.read()
-    await write(JSON.stringify(snapshot))
+    await write('usageJson', JSON.stringify(snapshot))
     ctx.logger.info(`llm-opendesign-go: quota ${usage.describe(snapshot)}`)
   }
 
@@ -132,6 +140,44 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     }, 5_000)
     return () => { clearInterval(timer) }
   })
+
+  // Local usage ledger: every request this plugin serves, priced with the public
+  // list. It needs no credential and covers the question a user can act on —
+  // which model on which key is spending what.
+  const ledger = new LedgerStore(LedgerStore.pathIn(resolveDshHome()))
+  /** Recompute the report and publish it, debounced to one write per burst. */
+  let pendingReport: ReturnType<typeof setTimeout> | undefined
+  const publishReport = (): void => {
+    if (pendingReport !== undefined) return
+    pendingReport = setTimeout(() => {
+      pendingReport = undefined
+      const write = fieldWriterOf(ctx)
+      if (write === undefined) return
+      const now = Date.now()
+      const report = summarize(ledger.all(), now - REPORT_WINDOW_MS, now)
+      void write('reportJson', JSON.stringify(report)).catch(() => undefined)
+    }, 1_000)
+  }
+  ctx.effect(() => () => {
+    if (pendingReport !== undefined) clearTimeout(pendingReport)
+  })
+  const recordUsage = (call: { model: string, accountRef: string, usage: TokenUsage }): void => {
+    const price = priceOf(call.model)
+    ledger.record({
+      at: Date.now(),
+      model: call.model,
+      accountRef: call.accountRef,
+      inputTokens: call.usage.inputTokens,
+      outputTokens: call.usage.outputTokens,
+      cacheReadTokens: call.usage.cacheReadTokens ?? 0,
+      cacheWriteTokens: call.usage.cacheWriteTokens ?? 0,
+      costUsd: costOf(price, call.usage),
+    })
+    publishReport()
+  }
+  ctx.provide('openDesignGoUsageLedger')
+  ctx.set('openDesignGoUsageLedger', { record: recordUsage, report: () => summarize(ledger.all(), Date.now() - REPORT_WINDOW_MS, Date.now()) })
+  publishReport()
 
   /**
    * Resolve one account's key through the credentials seam, falling back to the
@@ -162,6 +208,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       if (config.apiKeyEnv === ref) return
       ctx.logger.info(`llm-opendesign-go: account settled on ${ref}`)
     },
+    onUsage: recordUsage,
   })
 
   /**

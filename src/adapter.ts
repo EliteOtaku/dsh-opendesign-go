@@ -69,6 +69,16 @@ export interface OpenDesignAdapterOptions {
    * @param ref - the account that succeeded.
    */
   onAccountSettled?: (ref: string) => void
+  /**
+   * Report the token usage of one finished call so it can be priced and
+   * recorded.
+   *
+   * Called once per call that produced a usage chunk. A call that failed before
+   * reporting usage costs nothing measurable and is not recorded: counting it
+   * would make the ledger claim spend that never happened.
+   * @param call - the model, the account that served it, and its usage.
+   */
+  onUsage?: (call: { model: string, accountRef: string, usage: TokenUsage }) => void
 }
 
 /** One text or reasoning block accumulated while streaming. */
@@ -189,12 +199,17 @@ export class OpenDesignAdapter extends LlmAdapter {
       }
       const body = response.body
       if (body === null) throw emptyResponseFailure()
+      let usage: TokenUsage | undefined
       for await (const chunk of consumeSse(body)) {
         // Promote the account only once it has produced real output: an account
         // that fails after streaming began must not become the new default.
         if (chunk.type === 'block-end') this.#options.onAccountSettled?.(ref)
+        // Keep the terminal usage chunk so the ledger can price this call. The
+        // chunk is captured, not consumed: it is still yielded below.
+        if (chunk.type === 'usage') usage = chunk.usage
         yield chunk
       }
+      if (usage !== undefined) this.#options.onUsage?.({ model: options.model, accountRef: ref, usage })
       return
     }
     throw lastFailure ?? new LlmError('OpenDesign: no usable account', MISSING_CREDENTIAL)

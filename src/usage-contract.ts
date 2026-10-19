@@ -8,6 +8,7 @@
  *
  * @module dsh-opendesign-go/usage-contract
  */
+import type { ModelTotals, UsageReport } from './usage-ledger.ts'
 
 /** How one quota window stands right now. */
 export interface QuotaWindow {
@@ -91,6 +92,60 @@ export function percentUsedOf(usedCredits: string, limitCredits: string): number
   const limit = creditsToNumber(limitCredits)
   if (used === null || limit === null || limit <= 0) return null
   return Math.min(100, Math.max(0, Math.round((used / limit) * 100)))
+}
+
+/**
+ * Read the cached local usage report.
+ *
+ * The report is produced by this plugin, but it crosses an editable document,
+ * so it is validated the same way a quota reading is: a malformed value means
+ * "no report", never a fabricated one.
+ * @param raw - serialized report, or empty string.
+ * @returns the report, or undefined when absent or unusable.
+ */
+export function parseReport(raw: string | undefined): UsageReport | undefined {
+  if (raw === undefined || raw.length === 0) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+  if (parsed === null || typeof parsed !== 'object') return undefined
+  const row = parsed as Record<string, unknown>
+  if (typeof row.since !== 'number' || typeof row.until !== 'number' || typeof row.calls !== 'number') return undefined
+  if (!Array.isArray(row.models)) return undefined
+  const models: ModelTotals[] = []
+  for (const entry of row.models) {
+    if (entry === null || typeof entry !== 'object') continue
+    const model = entry as Record<string, unknown>
+    if (typeof model.model !== 'string' || typeof model.calls !== 'number'
+      || typeof model.inputTokens !== 'number' || typeof model.outputTokens !== 'number'
+      || typeof model.costUsd !== 'number') continue
+    models.push({
+      model: model.model,
+      calls: model.calls,
+      inputTokens: model.inputTokens,
+      outputTokens: model.outputTokens,
+      cacheReadTokens: typeof model.cacheReadTokens === 'number' ? model.cacheReadTokens : 0,
+      cacheWriteTokens: typeof model.cacheWriteTokens === 'number' ? model.cacheWriteTokens : 0,
+      costUsd: model.costUsd,
+      unpricedCalls: typeof model.unpricedCalls === 'number' ? model.unpricedCalls : 0,
+    })
+  }
+  return {
+    since: row.since,
+    until: row.until,
+    calls: row.calls,
+    inputTokens: typeof row.inputTokens === 'number' ? row.inputTokens : 0,
+    outputTokens: typeof row.outputTokens === 'number' ? row.outputTokens : 0,
+    cacheReadTokens: typeof row.cacheReadTokens === 'number' ? row.cacheReadTokens : 0,
+    cacheWriteTokens: typeof row.cacheWriteTokens === 'number' ? row.cacheWriteTokens : 0,
+    costUsd: typeof row.costUsd === 'number' ? row.costUsd : 0,
+    unpricedCalls: typeof row.unpricedCalls === 'number' ? row.unpricedCalls : 0,
+    models,
+    pricedAs: 'base-tier',
+  }
 }
 
 /**

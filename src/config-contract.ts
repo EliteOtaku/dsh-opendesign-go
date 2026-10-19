@@ -83,6 +83,14 @@ export interface OpenDesignConfig {
    * An empty string means nothing has been read yet.
    */
   readonly usageJson: string
+  /**
+   * Serialized local usage report, written by the host after each request.
+   *
+   * Separate from {@link usageJson}: this one comes from the plugin's own token
+   * accounting and needs no credential, so it is always present once a request
+   * has been served.
+   */
+  readonly reportJson: string
   /** Inference base URL without a trailing slash. */
   readonly baseURL: string
   /** Deadline for one dispatch, spanning discovery through streaming. */

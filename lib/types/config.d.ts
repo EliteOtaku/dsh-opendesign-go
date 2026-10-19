@@ -75,6 +75,10 @@ export interface LiveConfig {
     readonly usageJson: {
         get(): string;
     };
+    /** Serialized local usage report; empty until a request is served. */
+    readonly reportJson: {
+        get(): string;
+    };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {
         get(): string;

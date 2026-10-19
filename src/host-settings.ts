@@ -72,22 +72,31 @@ export function installHostSettings(ctx: Context): void {
  * @param ctx - host context that may carry a settings service.
  * @returns a writer, or undefined when this host cannot write settings.
  */
-export function usageWriterOf(ctx: Context): ((json: string) => Promise<void>) | undefined {
+/**
+ * Expose a writer for one cached field.
+ *
+ * The page reads these fields from the config mirror, so the host publishes a
+ * value by writing it. Keeping the write here means the plugin never keeps a
+ * second copy of the state: one document, one source of truth.
+ * @param ctx - host context that may carry a settings service.
+ * @returns a writer for a named field, or undefined when this host cannot write.
+ */
+export function fieldWriterOf(ctx: Context): ((field: string, json: string) => Promise<void>) | undefined {
   const settings = ctx.get('settings') as ProfileSettings | undefined
   if (settings === undefined || typeof settings.update !== 'function'
     || typeof settings.describe !== 'function' || settings.writable !== true) return undefined
-  return async (json: string) => {
+  return async (field: string, json: string) => {
     // Fence on the revision just read: a concurrent edit from the page must win
-    // rather than be silently overwritten by a quota refresh.
+    // rather than be silently overwritten by a background refresh.
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const row = settings.describe!().find((candidate) => candidate.ns === PROFILE_ENTRY_ID)
       if (row === undefined) return
       try {
-        await settings.update!(PROFILE_ENTRY_ID, { usageJson: json }, row.revision)
+        await settings.update!(PROFILE_ENTRY_ID, { [field]: json }, row.revision)
         return
       } catch (error) {
         if (attempt === 2) {
-          ctx.logger.warn(`llm-opendesign-go: could not cache the quota reading (${String(error)})`)
+          ctx.logger.warn(`llm-opendesign-go: could not cache ${field} (${String(error)})`)
         }
       }
     }
