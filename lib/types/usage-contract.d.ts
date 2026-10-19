@@ -45,6 +45,15 @@ export interface UsageSnapshot {
     readonly windows: readonly QuotaWindow[];
     /** Wallet, when the summary endpoint answered. */
     readonly wallet?: WalletSnapshot;
+    /**
+     * Credits per US dollar, as the service reports it (10000 today).
+     *
+     * Windows are denominated in credits, which mean nothing to a user; the
+     * dollar figure is what makes a quota bar legible. The rate comes from the
+     * service rather than being hardcoded, so a change in scale shows up instead
+     * of silently misreporting every number.
+     */
+    readonly creditsPerUsd?: number;
     /** Set when the quota channel is configured but the last read failed. */
     readonly error?: string;
 }

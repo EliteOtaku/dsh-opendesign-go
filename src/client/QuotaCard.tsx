@@ -9,7 +9,7 @@
  * @module dsh-opendesign-go/client/QuotaCard
  */
 import type { ReactElement } from 'react'
-import { windowLabel } from '../usage-contract.ts'
+import { creditsToNumber, windowLabel } from '../usage-contract.ts'
 import type { QuotaWindow, UsageSnapshot } from '../usage-contract.ts'
 
 /** Bar colour thresholds: warn near the limit, stop at it. */
@@ -47,10 +47,23 @@ export function resetCountdown(resetsAt: string, now: number = Date.now()): stri
   return `${rest}分钟后重置`
 }
 
-/** One dual-bar row: label, countdown, bar, percentage. */
-function WindowRow({ window }: { readonly window: QuotaWindow }): ReactElement {
+/** One dual-bar row: label, countdown, bar, percentage, dollar value. */
+function WindowRow({ window, creditsPerUsd }: {
+  readonly window: QuotaWindow
+  readonly creditsPerUsd?: number | undefined
+}): ReactElement {
   const percent = window.percentUsed
   const label = windowLabel(window.durationSeconds)
+  // Credits are the service's unit and mean nothing to a user; the dollar
+  // figure is what makes the bar legible, so it is shown beside it.
+  const dollars = (credits: string): string | undefined => {
+    if (creditsPerUsd === undefined || creditsPerUsd <= 0) return undefined
+    const used = creditsToNumber(credits)
+    if (used === null) return undefined
+    return `$${(used / creditsPerUsd).toFixed(2)}`
+  }
+  const usedUsd = dollars(window.usedCredits)
+  const limitUsd = dollars(window.limitCredits)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
@@ -82,6 +95,11 @@ function WindowRow({ window }: { readonly window: QuotaWindow }): ReactElement {
           <span style={{ fontSize: '12px', fontVariantNumeric: 'tabular-nums', minWidth: '36px', textAlign: 'right' }}>
             {percent}%
           </span>
+        </div>
+      )}
+      {usedUsd !== undefined && limitUsd !== undefined && (
+        <div style={{ fontSize: '11px', opacity: 0.55, fontVariantNumeric: 'tabular-nums' }}>
+          已用 {usedUsd} / {limitUsd}
         </div>
       )}
     </div>
@@ -142,7 +160,7 @@ export function QuotaCard({ snapshot, loading }: {
         <span style={{ fontSize: '11px', opacity: 0.5 }}>读取于 {new Date(snapshot.asOf).toLocaleTimeString()}</span>
       </div>
       {snapshot.windows.map((window) => (
-        <WindowRow key={window.durationSeconds} window={window} />
+        <WindowRow key={window.durationSeconds} window={window} creditsPerUsd={snapshot.creditsPerUsd} />
       ))}
       {snapshot.wallet !== undefined && (
         <div style={{ fontSize: '12px', opacity: 0.65, borderTop: '1px solid rgba(128,128,128,0.18)', paddingTop: '10px' }}>

@@ -105,7 +105,6 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   const value = snapshot.value
   const enabled = value?.enabled ?? true
   const editable = snapshot.status === 'ready' && snapshot.writable
-  const sessionRef = value?.sessionRef ?? ''
   const useVela = value?.useVelaCredential ?? false
   // The host publishes each quota reading into the config document, which this
   // page already receives; parsing it here needs no second transport and keeps
@@ -114,19 +113,6 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   // Local accounting: produced by this plugin's own adapter, so it needs no
   // console session and is the primary usage surface.
   const report = useMemo(() => parseReport(value?.reportJson), [value?.reportJson])
-  const usageLoading = false
-
-  /**
-   * Ask the host for a fresh reading.
-   *
-   * The page cannot read the console itself (it holds no session), so this only
-   * nudges the host: writing the same values re-arms its watcher, and the new
-   * snapshot arrives through the config mirror.
-   */
-  const loadUsage = (): void => {
-    if (!editable) return
-    void form.set('sessionRef', sessionRef)
-  }
 
   /**
    * Flip the route switch. A refusal is surfaced instead of swallowed: the
@@ -197,7 +183,7 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
 
       <UsageCard report={report} />
 
-      <QuotaCard snapshot={usage} loading={usageLoading} />
+      <QuotaCard snapshot={usage} loading={false} />
 
       <div style={cardStyle}>
         <div style={{ fontSize: '14px', fontWeight: 500 }}>额度来源</div>
@@ -223,43 +209,6 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
             若 OpenDesign 升级后格式变化，这里会显示失败原因而不是给出错误数字。
           </p>
         )}
-      </div>
-
-      <div style={cardStyle}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>额度通道（控制台会话，可选）</div>
-        <p style={{ ...hintStyle, marginTop: '4px' }}>
-          另一种读取方式：用控制台会话凭据直接请求额度接口。与上面的 vela 方式二选一，
-          两种都关闭时只显示本地用量估算。
-        </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
-          <label style={{ fontSize: '12px', opacity: 0.7 }}>
-            会话凭据引用名
-            <input
-              type="text"
-              defaultValue={sessionRef}
-              disabled={!editable}
-              placeholder="OPENDESIGN_SESSION"
-              onBlur={(event) => { void form.set('sessionRef', event.target.value.trim()) }}
-              style={inputStyle}
-            />
-          </label>
-          <label style={{ fontSize: '12px', opacity: 0.7 }}>
-            工作空间 ID
-            <input
-              type="text"
-              defaultValue={value?.workspaceId ?? ''}
-              disabled={!editable}
-              placeholder="workspaceId（控制台 URL 里的 t…）"
-              onBlur={(event) => { void form.set('workspaceId', event.target.value.trim()) }}
-              style={inputStyle}
-            />
-          </label>
-          <div>
-            <button type="button" onClick={loadUsage} disabled={!editable || usageLoading} style={buttonStyle}>
-              {usageLoading ? '读取中…' : '刷新额度'}
-            </button>
-          </div>
-        </div>
       </div>
 
       <div style={cardStyle}>

@@ -106,11 +106,15 @@ export async function velaWhoami(binary: string): Promise<string | undefined> {
 export async function resolveWorkspaceId(binary: string, explicit: string | undefined): Promise<string | undefined> {
   if (explicit !== undefined && explicit.trim().length > 0) return explicit.trim()
   try {
-    const raw = await runJson(binary, ['billing', 'summary', '--format', 'json'])
+    // `team-projects list` answers the *current* workspace without being told
+    // which one, which is the only command that exposes it. `billing summary`
+    // does not carry the id, and the console has no visible "workspace" concept
+    // for a user to copy from.
+    const raw = await runJson(binary, ['team-projects', 'list'])
     const workspace = (raw as { workspaceId?: unknown }).workspaceId
     if (typeof workspace === 'string' && workspace.length > 0) return workspace
   } catch {
-    // The summary may not carry it; fall through to "unknown".
+    // Fall through: without an id there is nothing to read.
   }
   return undefined
 }
@@ -177,8 +181,24 @@ export async function readVelaUsage(binary: string, workspaceId: string | undefi
   if (windows.length === 0) return empty('vela 未返回任何额度窗口')
 
   // The wallet is reported separately and is the fallback funding source once
-  // the plan allowance is spent, so both are surfaced.
+  // the plan allowance is spent, so both are surfaced. The same call yields the
+  // credits-to-dollar rate, which is what makes the window numbers legible.
   let balanceUsd = funding.balanceUsd
+  let creditsPerUsd: number | undefined
+  try {
+    const summary = await runJson(binary, ['billing', 'summary', '--format', 'json']) as {
+      creditsPerUsd?: unknown
+      balanceUsd?: unknown
+    }
+    if (typeof summary.creditsPerUsd === 'number' && summary.creditsPerUsd > 0) {
+      creditsPerUsd = summary.creditsPerUsd
+    }
+    if (balanceUsd === undefined && typeof summary.balanceUsd === 'string') {
+      balanceUsd = summary.balanceUsd
+    }
+  } catch {
+    // Both are nice-to-haves; the windows already answered the question.
+  }
   if (balanceUsd === undefined) {
     try {
       const snapshot = await runJson(binary, [
@@ -188,7 +208,7 @@ export async function readVelaUsage(binary: string, workspaceId: string | undefi
       ]) as WorkspaceSnapshot
       balanceUsd = snapshot.wallet?.balanceUsd
     } catch {
-      // Balance is a nice-to-have; the windows already answered the question.
+      // Same: the windows stand on their own.
     }
   }
 
@@ -198,6 +218,7 @@ export async function readVelaUsage(binary: string, workspaceId: string | undefi
     eligible: plan.eligible === true,
     windows,
     ...(balanceUsd === undefined ? {} : { wallet: { balanceUsd } }),
+    ...(creditsPerUsd === undefined ? {} : { creditsPerUsd }),
   }
   return snapshot
 }

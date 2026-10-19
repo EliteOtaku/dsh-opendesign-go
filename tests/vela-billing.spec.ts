@@ -30,3 +30,19 @@ describe('readVelaUsage', () => {
     expect(snapshot.windows).toEqual([])
   })
 })
+
+describe('resolveWorkspaceId', () => {
+  it('prefers an explicit id without calling the CLI', async () => {
+    const { resolveWorkspaceId } = await import('../src/vela-billing.ts')
+    // A missing binary would make any CLI call fail; returning the explicit id
+    // proves the call is skipped.
+    expect(await resolveWorkspaceId('/definitely/not/here/vela', ' ws-explicit ')).toBe('ws-explicit')
+  })
+
+  it('returns undefined rather than guessing when the CLI cannot answer', async () => {
+    const { resolveWorkspaceId } = await import('../src/vela-billing.ts')
+    // The console shows no workspace concept, so an invented id would silently
+    // read another workspace's numbers.
+    expect(await resolveWorkspaceId('/definitely/not/here/vela', undefined)).toBeUndefined()
+  })
+})
