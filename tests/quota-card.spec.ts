@@ -1,10 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { resetCountdown } from '../src/client/QuotaCard.tsx'
+import { barColor, resetCountdown } from '../src/client/QuotaCard.tsx'
 
 const NOW = Date.parse('2026-10-19T09:00:00.000Z')
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+describe('barColor', () => {
+  it('alarms on little remaining, not on much consumed', () => {
+    // The bar fills with what is left, so a 95%-used window renders as a short
+    // bar. Colouring by consumed share would paint it red while the label said
+    // "剩余 5%", which reads as a contradiction.
+    expect(barColor(5)).toBe('#e5484d')
+    expect(barColor(20)).toBe('#e5a00d')
+    expect(barColor(92)).toBe('#3b82f6')
+  })
 })
 
 describe('resetCountdown', () => {

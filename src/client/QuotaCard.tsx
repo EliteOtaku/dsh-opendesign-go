@@ -12,18 +12,24 @@ import type { ReactElement } from 'react'
 import { creditsToNumber, windowLabel } from '../usage-contract.ts'
 import type { QuotaWindow, UsageSnapshot } from '../usage-contract.ts'
 
-/** Bar colour thresholds: warn near the limit, stop at it. */
-const WARN_AT = 75
-const STOP_AT = 95
+// Remaining-percentage thresholds. 25% left is the point a user should start
+// caring; 5% is the point it will run out mid-task.
+const WARN_AT = 25
+const STOP_AT = 5
 
 /**
- * Colour for one consumed percentage.
- * @param percent - 0–100.
+ * Colour for one remaining percentage.
+ *
+ * Expressed in remaining terms so it matches the bar it paints: a bar that is
+ * nearly empty is the alarming state, and colouring by consumed share would
+ * turn a 95%-used window into full-length red — visually loud while the number
+ * beside it said 5%.
+ * @param remaining - 0–100.
  * @returns the fill colour.
  */
-function barColor(percent: number): string {
-  if (percent >= STOP_AT) return '#e5484d'
-  if (percent >= WARN_AT) return '#e5a00d'
+export function barColor(remaining: number): string {
+  if (remaining <= STOP_AT) return '#e5484d'
+  if (remaining <= WARN_AT) return '#e5a00d'
   return '#3b82f6'
 }
 
@@ -52,7 +58,11 @@ function WindowRow({ window, creditsPerUsd }: {
   readonly window: QuotaWindow
   readonly creditsPerUsd?: number | undefined
 }): ReactElement {
-  const percent = window.percentUsed
+  const used = window.percentUsed
+  // Remaining, not consumed: the OpenDesign dashboard reports "剩余 88%" and a
+  // bar that fills as quota is left, so showing consumed share here would mean
+  // two surfaces quoting the same data as opposite numbers.
+  const remaining = used === null ? null : Math.max(0, 100 - used)
   const label = windowLabel(window.durationSeconds)
   // Credits are the service's unit and mean nothing to a user; the dollar
   // figure is what makes the bar legible, so it is shown beside it.
@@ -64,13 +74,20 @@ function WindowRow({ window, creditsPerUsd }: {
   }
   const usedUsd = dollars(window.usedCredits)
   const limitUsd = dollars(window.limitCredits)
+  // Remaining money, to match the percentage and the bar above it.
+  const remainingUsd = ((): string | undefined => {
+    if (creditsPerUsd === undefined || creditsPerUsd <= 0) return undefined
+    const left = creditsToNumber(window.remainingCredits)
+    if (left === null) return undefined
+    return `$${(left / creditsPerUsd).toFixed(2)}`
+  })()
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
         <span style={{ fontSize: '13px', fontWeight: 500 }}>{label}额度</span>
         <span style={{ fontSize: '12px', opacity: 0.6 }}>{resetCountdown(window.resetsAt)}</span>
       </div>
-      {percent === null ? (
+      {remaining === null ? (
         <div style={{ fontSize: '12px', opacity: 0.6 }}>
           此窗口未返回可用限额（已用 {window.usedCredits} / 限额 {window.limitCredits}）
         </div>
@@ -78,10 +95,10 @@ function WindowRow({ window, creditsPerUsd }: {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div
             role="progressbar"
-            aria-valuenow={percent}
+            aria-valuenow={remaining}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={`${label}额度已用百分比`}
+            aria-label={`${label}额度剩余百分比`}
             style={{
               flex: 1,
               height: '8px',
@@ -90,16 +107,17 @@ function WindowRow({ window, creditsPerUsd }: {
               overflow: 'hidden',
             }}
           >
-            <div style={{ width: `${percent}%`, height: '100%', borderRadius: '999px', background: barColor(percent) }} />
+            <div style={{ width: `${remaining}%`, height: '100%', borderRadius: '999px', background: barColor(remaining) }} />
           </div>
           <span style={{ fontSize: '12px', fontVariantNumeric: 'tabular-nums', minWidth: '36px', textAlign: 'right' }}>
-            {percent}%
+            剩余 {remaining}%
           </span>
         </div>
       )}
-      {usedUsd !== undefined && limitUsd !== undefined && (
+      {remainingUsd !== undefined && limitUsd !== undefined && (
         <div style={{ fontSize: '11px', opacity: 0.55, fontVariantNumeric: 'tabular-nums' }}>
-          已用 {usedUsd} / {limitUsd}
+          剩余 {remainingUsd} / {limitUsd}
+          {usedUsd !== undefined && <span style={{ opacity: 0.75 }}>{`（已用 ${usedUsd}）`}</span>}
         </div>
       )}
     </div>

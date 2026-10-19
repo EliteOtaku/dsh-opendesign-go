@@ -11,6 +11,17 @@
 import type { ReactElement } from 'react';
 import type { UsageSnapshot } from '../usage-contract.ts';
 /**
+ * Colour for one remaining percentage.
+ *
+ * Expressed in remaining terms so it matches the bar it paints: a bar that is
+ * nearly empty is the alarming state, and colouring by consumed share would
+ * turn a 95%-used window into full-length red — visually loud while the number
+ * beside it said 5%.
+ * @param remaining - 0–100.
+ * @returns the fill colour.
+ */
+export declare function barColor(remaining: number): string;
+/**
  * Format a reset time as a coarse countdown, which is what a quota bar needs.
  * @param resetsAt - ISO timestamp from the console.
  * @param now - reference instant.
