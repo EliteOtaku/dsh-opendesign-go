@@ -86,6 +86,11 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     },
     activeRef: () => current().apiKeyEnv,
   })
+  // Publish the service for other plugins and the page. `provide` must come
+  // first: `ctx.set` throws without it, and a throw inside `apply` aborts this
+  // entry's activation — which silently removes the plugin from the settings
+  // service's `describe()` and leaves its page stuck on "unavailable".
+  ctx.provide('openDesignGoUsage')
   ctx.set('openDesignGoUsage', usage)
 
   /**
