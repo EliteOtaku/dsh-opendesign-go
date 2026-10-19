@@ -163,6 +163,16 @@ function windowOf(raw: NonNullable<NonNullable<FundingCheck['codingPlan']>['wind
  * @param workspaceId - workspace to read, when already known.
  * @returns the snapshot.
  */
+/**
+ * Credits per US dollar, as the Go plan publishes them.
+ *
+ * Observed from `billing summary` while it answered (2026-10-19), and implied
+ * independently by both quota windows: 50000 credits / $5 and 150000 / $15 are
+ * both 10000. Kept as a documented constant because the command now returns 403
+ * and no other one exposes the rate.
+ */
+export const FALLBACK_CREDITS_PER_USD = 10_000
+
 export async function readVelaUsage(binary: string, workspaceId: string | undefined): Promise<UsageSnapshot> {
   const asOf = new Date().toISOString()
   const empty = (error: string): UsageSnapshot => ({ asOf, tier: '', eligible: false, windows: [], error })
@@ -212,8 +222,14 @@ export async function readVelaUsage(binary: string, workspaceId: string | undefi
       balanceUsd = summary.balanceUsd
     }
   } catch {
-    // Both are nice-to-haves; the windows already answered the question.
+    // `billing summary` started returning 403 on 2026-10-19, and it was the only
+    // command exposing the credits-to-dollar rate. Both Go windows independently
+    // imply the same rate (50000/5 and 150000/15 are both 10000), so the
+    // documented value is used rather than dropping the rate entirely and
+    // leaving every window amount unitless.
+    creditsPerUsd = FALLBACK_CREDITS_PER_USD
   }
+  if (creditsPerUsd === undefined) creditsPerUsd = FALLBACK_CREDITS_PER_USD
   if (balanceUsd === undefined) {
     try {
       const snapshot = await runJson(binary, [

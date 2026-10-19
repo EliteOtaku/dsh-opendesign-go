@@ -37,7 +37,9 @@ export declare function resetCountdown(resetsAt: string, now?: number): string;
  * @param props - the host reading, or undefined while it is being fetched.
  * @returns the quota card.
  */
-export declare function QuotaCard({ snapshot, loading }: {
+export declare function QuotaCard({ snapshot, loading, ledgerCostUsd }: {
     readonly snapshot: UsageSnapshot | undefined;
     readonly loading: boolean;
+    /** What this plugin measured for the same traffic, priced at vendor rates. */
+    readonly ledgerCostUsd?: number | undefined;
 }): ReactElement;

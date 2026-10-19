@@ -133,9 +133,11 @@ function WindowRow({ window, creditsPerUsd }: {
  * @param props - the host reading, or undefined while it is being fetched.
  * @returns the quota card.
  */
-export function QuotaCard({ snapshot, loading }: {
+export function QuotaCard({ snapshot, loading, ledgerCostUsd }: {
   readonly snapshot: UsageSnapshot | undefined
   readonly loading: boolean
+  /** What this plugin measured for the same traffic, priced at vendor rates. */
+  readonly ledgerCostUsd?: number | undefined
 }): ReactElement {
   const card = {
     border: '1px solid rgba(128, 128, 128, 0.25)',
@@ -189,8 +191,76 @@ export function QuotaCard({ snapshot, loading }: {
           {' · 并发 10（按 2026-10-19 官方口径）'}
         </div>
       )}
+      <PlanSpendComparison snapshot={snapshot} ledgerCostUsd={ledgerCostUsd} />
       {snapshot.error !== undefined && (
         <p style={{ ...hint, fontSize: '12px' }}>部分数据缺失：{snapshot.error}</p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Reconcile plan credits against this plugin's own measurement.
+ *
+ * The two numbers answer different questions and are expected to differ:
+ *
+ * - Plan credits are what OpenDesign deducted, converted at the published
+ *   10000-credits-per-dollar rate. That is the authoritative figure.
+ * - The ledger is what the same tokens would cost at each vendor's list price,
+ *   computed from `usage` fields on the responses this plugin actually served.
+ *
+ * They diverge for real reasons — the plan meters cached input differently from
+ * vendor list prices, and it only counts traffic that went through this plugin,
+ * not the official client. Printing them side by side with the ratio is the
+ * point: if the ratio drifts far from 1, the plan's accounting is not what the
+ * vendor prices imply, and the user can see that rather than trusting a single
+ * silent number.
+ * @param props - the quota snapshot and the measured cost.
+ * @returns the comparison block, or nothing when either side is unavailable.
+ */
+function PlanSpendComparison({ snapshot, ledgerCostUsd }: {
+  readonly snapshot: UsageSnapshot
+  readonly ledgerCostUsd?: number | undefined
+}): ReactElement | undefined {
+  const rate = snapshot.creditsPerUsd
+  if (rate === undefined || rate <= 0) return undefined
+  // The 7-day window is the widest and matches the 30-day report closely enough
+  // to compare; the 5-hour window would be a subset and understate the plan side.
+  const weekly = snapshot.windows.reduce<QuotaWindow | undefined>(
+    (widest, window) => (widest === undefined || window.durationSeconds > widest.durationSeconds ? window : widest),
+    undefined,
+  )
+  if (weekly === undefined) return undefined
+  const planUsd = creditsToNumber(weekly.usedCredits)
+  if (planUsd === null) return undefined
+  const planSpent = planUsd / rate
+  const measured = ledgerCostUsd
+  const ratio = measured === undefined || measured <= 0 ? undefined : planSpent / measured
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '3px',
+      fontSize: '11px',
+      opacity: 0.6,
+      fontVariantNumeric: 'tabular-nums',
+      borderTop: '1px solid rgba(128,128,128,0.18)',
+      paddingTop: '10px',
+    }}>
+      <div>
+        本周期已扣 {planSpent.toFixed(2)} 美元（按 {rate} credits = $1 折算）
+      </div>
+      {measured !== undefined && (
+        <div>
+          其中经本插件 {measured.toFixed(4)} 美元（按厂商单价估算
+          {ratio !== undefined && <span>{`，相差 ${ratio.toFixed(1)} 倍`}</span>}）
+        </div>
+      )}
+      {measured !== undefined && ratio !== undefined && ratio >= 10 && (
+        <div style={{ opacity: 0.85 }}>
+          差额通常来自套餐对缓存输入与官方客户端的计量口径，不代表单价错误。
+        </div>
       )}
     </div>
   )

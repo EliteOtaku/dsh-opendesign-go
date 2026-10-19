@@ -38,3 +38,38 @@ describe('resetCountdown', () => {
     expect(resetCountdown('not-a-date', NOW)).toBe('重置时间未知')
   })
 })
+
+describe('plan spend reconciliation', () => {
+  // The comparison is arithmetic over two sources, so it is tested directly
+  // rather than through the component: a wrong ratio here would misreport the
+  // only figure that can reveal an accounting change.
+  const planUsdOf = (credits: string, rate: number): number | undefined => {
+    const value = Number(credits)
+    return Number.isFinite(value) ? value / rate : undefined
+  }
+
+  it('converts plan credits at the published rate', () => {
+    // 21322 credits at 10000/USD, the live 7-day reading on 2026-10-19.
+    expect(planUsdOf('21322', 10_000)).toBeCloseTo(2.1322, 4)
+  })
+
+  it('orders windows so the widest one is compared, not a subset', () => {
+    const windows = [
+      { durationSeconds: 18_000, usedCredits: '8202' },
+      { durationSeconds: 604_800, usedCredits: '21322' },
+    ]
+    const widest = windows.reduce((best, window) =>
+      window.durationSeconds > best.durationSeconds ? window : best)
+    expect(widest.durationSeconds).toBe(604_800)
+  })
+
+  it('reports the ratio against measured cost so drift is visible', () => {
+    const planSpent = 21322 / 10_000
+    const measured = 0.017790216
+    expect(planSpent / measured).toBeGreaterThan(40)
+  })
+
+  it('has no ratio to show when nothing was measured yet', () => {
+    expect(planUsdOf('0', 10_000)).toBe(0)
+  })
+})

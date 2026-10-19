@@ -185,7 +185,7 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
 
       <UsageCard report={report} />
 
-      <QuotaCard snapshot={usage} loading={false} />
+      <QuotaCard snapshot={usage} loading={false} ledgerCostUsd={report?.costUsd} />
 
       <div style={cardStyle}>
         <div style={{ fontSize: '14px', fontWeight: 500 }}>额度来源</div>

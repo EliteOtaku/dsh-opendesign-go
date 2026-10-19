@@ -28,4 +28,13 @@ export declare function resolveWorkspaceId(binary: string, explicit: string | un
  * @param workspaceId - workspace to read, when already known.
  * @returns the snapshot.
  */
+/**
+ * Credits per US dollar, as the Go plan publishes them.
+ *
+ * Observed from `billing summary` while it answered (2026-10-19), and implied
+ * independently by both quota windows: 50000 credits / $5 and 150000 / $15 are
+ * both 10000. Kept as a documented constant because the command now returns 403
+ * and no other one exposes the rate.
+ */
+export declare const FALLBACK_CREDITS_PER_USD = 10000;
 export declare function readVelaUsage(binary: string, workspaceId: string | undefined): Promise<UsageSnapshot>;
