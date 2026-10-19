@@ -15,6 +15,7 @@
         reportJson: ''
         useVelaCredential: false
         modelParamsJson: ''
+        enabledModelsJson: ''
         baseURL: https://amr-link.open-design.ai/v1
         requestTimeoutMs: 1800000
         streamIdleTimeoutMs: 300000

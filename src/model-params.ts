@@ -39,10 +39,21 @@ export interface ModelParamOverride {
 /**
  * Gateway defaults, read from `GET /v1/models` on 2026-10-19.
  *
+ * These are the *gateway's* limits, which is what a request is actually checked
+ * against, and they are not the same as the vendor's published model spec:
+ *
+ * - DeepSeek's own docs list 1M context and a 384K output maximum for
+ *   `deepseek-flash`, while the gateway reports `output_budget: 128000`. The
+ *   narrower number wins here because it is the one the endpoint enforces.
+ * - The same docs state that `deepseek-v4-flash` and
+ *   `deepseek-v4-flash-vision-exp` are retired ids now served by
+ *   DeepSeek-V4.1-Flash-1017 at Flash pricing. They stay in the list because
+ *   the gateway still advertises and accepts them.
+ *
  * `context_limit` is the window; `output_budget` is the per-request cap. The
- * gateway also reports `context_budget`, which is smaller than the window — it
- * is the practical prompt allowance, and using it as the window would hide
- * usable capacity, so the window is taken from `context_limit`.
+ * gateway also reports `context_budget`, smaller than the window — it is the
+ * practical prompt allowance, and using it as the window would hide usable
+ * capacity, so the window is taken from `context_limit`.
  */
 export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
   'claude-haiku-5.5': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
@@ -153,3 +164,34 @@ export const REASONING_EFFORTS = [
 
 /** Reasoning effort used when a caller omits one. */
 export const DEFAULT_REASONING_EFFORT = 'medium'
+
+/**
+ * Read the enabled-model list from its serialized config field.
+ *
+ * An empty list means "all models". That default matters: a fresh install has
+ * an empty field, and treating it as "none enabled" would leave the picker
+ * blank with no explanation.
+ * @param raw - serialized array, or empty string.
+ * @returns enabled ids, or an empty array meaning "all".
+ */
+export function parseEnabledModels(raw: string | undefined): string[] {
+  if (raw === undefined || raw.length === 0) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  return parsed.filter((id): id is string => typeof id === 'string' && id.length > 0)
+}
+
+/**
+ * Whether one model should appear in the picker.
+ * @param model - exact model id.
+ * @param enabled - enabled ids; empty means all.
+ * @returns true when the model is offered.
+ */
+export function isModelEnabled(model: string, enabled: readonly string[]): boolean {
+  return enabled.length === 0 || enabled.includes(model)
+}

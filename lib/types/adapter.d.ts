@@ -70,9 +70,14 @@ export declare class OpenDesignAdapter extends LlmAdapter {
      */
     providerInfo(provider: string): LlmProviderInfo;
     /**
-     * Advertise the Design Plan seed catalog.
+     * Advertise the models the user left enabled.
+     *
+     * An empty enabled list means "all", so a fresh install shows the full
+     * catalog; hiding a model is opt-in. Filtering here rather than in the picker
+     * means a disabled model is absent from every consumer, including the
+     * composer, not merely hidden from one list.
      * @param provider - registered provider route.
-     * @returns the seed rows projected for this route, in display order.
+     * @returns the enabled rows, in display order.
      */
     listModels(provider: string): Promise<readonly LlmModelInfo[]>;
     /**

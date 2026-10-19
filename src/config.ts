@@ -14,7 +14,7 @@
 import z from '@deepseek-ai/schemastery'
 import { DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL } from './config-contract.ts'
 import type { OpenDesignAccount, OpenDesignConfig } from './config-contract.ts'
-import { parseModelParams } from './model-params.ts'
+import { parseEnabledModels, parseModelParams } from './model-params.ts'
 
 /** Deadline for one dispatch, spanning discovery through streaming. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 1_800_000
@@ -73,6 +73,7 @@ export const PlainConfig: z<OpenDesignConfig> = z.object({
   useVelaCredential: z.boolean().default(false),
   diagnosticsJson: z.string().default(''),
   modelParamsJson: z.string().default(''),
+  enabledModelsJson: z.string().default(''),
   baseURL: z.string().default(DEFAULT_BASE_URL),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -103,6 +104,7 @@ export const Config = z.object({
   useVelaCredential: z.boolean().default(false).volatile(),
   diagnosticsJson: z.string().default('').volatile(),
   modelParamsJson: z.string().default('').volatile(),
+  enabledModelsJson: z.string().default('').volatile(),
   baseURL: z.string().default(DEFAULT_BASE_URL).volatile(),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS).volatile(),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS).volatile(),
@@ -138,6 +140,8 @@ export interface LiveConfig {
   readonly diagnosticsJson: { get(): string }
   /** Per-model parameter overrides, serialized. */
   readonly modelParamsJson: { get(): string }
+  /** Enabled model ids, serialized. */
+  readonly enabledModelsJson: { get(): string }
   /** Inference base URL, stored as configured. */
   readonly baseURL: { get(): string }
   /** Deadline for one dispatch. */
@@ -164,6 +168,8 @@ export function readConfig(config: LiveConfig): OpenDesignConfig {
     useVelaCredential: config.useVelaCredential.get(),
     diagnosticsJson: config.diagnosticsJson.get(),
     modelParamsJson: config.modelParamsJson.get(),
+    enabledModelsJson: config.enabledModelsJson.get(),
+    enabledModels: parseEnabledModels(config.enabledModelsJson.get()),
     modelParams: parseModelParams(config.modelParamsJson.get()),
     baseURL: migrateGatewayBaseURL(config.baseURL.get()),
     requestTimeoutMs: config.requestTimeoutMs.get(),

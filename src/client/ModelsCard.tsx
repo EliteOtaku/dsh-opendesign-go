@@ -24,6 +24,8 @@ import {
   MIN_CONTEXT_WINDOW,
   MIN_MAX_TOKENS,
   MODEL_DEFAULTS,
+  isModelEnabled,
+  parseEnabledModels,
   parseModelParams,
 } from '../model-params.ts'
 
@@ -71,11 +73,42 @@ export function ModelsCard({ form, config, editable }: {
     () => parseModelParams(config?.modelParamsJson),
     [config?.modelParamsJson],
   )
+  const enabled = useMemo(() => parseEnabledModels(config?.enabledModelsJson), [config?.enabledModelsJson])
   const [editing, setEditing] = useState<string | undefined>(undefined)
   const [draftContext, setDraftContext] = useState('')
   const [draftMax, setDraftMax] = useState('')
   const [error, setError] = useState<string | undefined>(undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
+
+  /**
+   * Turn one model on or off in the picker.
+   *
+   * The stored list is materialized on first toggle: an empty field means "all",
+   * so flipping one model off has to write every other id explicitly, or the
+   * empty-means-all rule would turn the change into a no-op.
+   */
+  const toggle = (model: string): void => {
+    setError(undefined)
+    setNotice(undefined)
+    const current = enabled.length === 0
+      ? GO_DESIGN_PLAN_MODELS.map((row) => row.id)
+      : [...enabled]
+    const next = current.includes(model)
+      ? current.filter((id) => id !== model)
+      : [...current, model]
+    // Writing the full catalog back means "all enabled" again; store empty so a
+    // future model added to the seed is picked up without re-saving.
+    const allOn = next.length === GO_DESIGN_PLAN_MODELS.length
+    void form.mutate([{ op: 'set', path: ['enabledModelsJson'], value: allOn ? '' : JSON.stringify(next) }])
+      .then((accepted) => {
+        if (accepted === false) {
+          setError('宿主拒绝了这次修改')
+          return
+        }
+        setNotice(next.includes(model) ? `已启用 ${model}` : `已停用 ${model}`)
+      })
+      .catch((reason: unknown) => { setError(String(reason)) })
+  }
 
   /** Persist one model's overrides, or clear them when both are blank. */
   const save = (model: string): void => {
@@ -124,8 +157,9 @@ export function ModelsCard({ form, config, editable }: {
         <span style={{ fontSize: '12px', opacity: 0.6 }}>{GO_DESIGN_PLAN_MODELS.length} 个</span>
       </div>
       <p style={hint}>
-        Go 套餐授予的 12 个 Design Plan 模型（Go 不含套餐模型额度）。参数取自官方
-        <code style={{ margin: '0 3px' }}>/v1/models</code>，留空即沿用官方值。
+        取消勾选后该模型不再出现在会话的模型选择器里，但仍可用 API 直接调用。
+        参数默认值取自 OpenDesign 的 <code style={{ margin: '0 3px' }}>/v1/models</code>，
+        与厂商公布的模型规格可能不同（网关会再限一层），留空即沿用网关值。
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -147,9 +181,19 @@ export function ModelsCard({ form, config, editable }: {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '10px' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: '13px' }}>{model.name}</div>
-                  <div style={{ fontSize: '11px', opacity: 0.55 }}>{model.id}</div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={isModelEnabled(model.id, enabled)}
+                    disabled={!editable}
+                    onChange={() => { toggle(model.id) }}
+                    aria-label={`在模型列表中${isModelEnabled(model.id, enabled) ? '停用' : '启用'} ${model.name}`}
+                    style={{ marginTop: '3px', cursor: editable ? 'pointer' : 'default' }}
+                  />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', opacity: isModelEnabled(model.id, enabled) ? 1 : 0.5 }}>{model.name}</div>
+                    <div style={{ fontSize: '11px', opacity: 0.55 }}>{model.id}</div>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
                   <span style={{ fontSize: '11px', opacity: 0.7, fontVariantNumeric: 'tabular-nums' }}>
@@ -166,8 +210,12 @@ export function ModelsCard({ form, config, editable }: {
                         setEditing(undefined)
                         return
                       }
-                      setDraftContext(String(override?.contextWindow ?? ''))
-                      setDraftMax(String(override?.maxTokens ?? ''))
+                      // Prefill the effective value so the box shows what is
+                      // actually in use; leaving the fallback in the
+                      // placeholder made an empty box look like "unset" even
+                      // when a default applied.
+                      setDraftContext(String(override?.contextWindow ?? base?.contextWindow ?? ''))
+                      setDraftMax(String(override?.maxTokens ?? base?.maxTokens ?? ''))
                       setError(undefined)
                       setNotice(undefined)
                       setEditing(model.id)

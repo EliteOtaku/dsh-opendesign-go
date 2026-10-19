@@ -91,6 +91,10 @@ export interface LiveConfig {
     readonly modelParamsJson: {
         get(): string;
     };
+    /** Enabled model ids, serialized. */
+    readonly enabledModelsJson: {
+        get(): string;
+    };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {
         get(): string;

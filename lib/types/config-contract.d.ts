@@ -101,6 +101,16 @@ export interface OpenDesignConfig {
      * hid this plugin's whole page.
      */
     readonly modelParamsJson: string;
+    /**
+     * Which models appear in the session model picker, serialized as a JSON array.
+     *
+     * Empty means "all of them", which keeps a fresh install usable without the
+     * user having to opt in to anything. A model the user never uses is noise in
+     * the picker, so hiding one must not require editing the composition.
+     */
+    readonly enabledModelsJson: string;
+    /** Parsed enabled-model list, filled by `readConfig`; empty means all. */
+    readonly enabledModels?: readonly string[];
     /** Parsed override table, filled by `readConfig`. */
     readonly modelParams?: Readonly<Record<string, {
         contextWindow?: number;

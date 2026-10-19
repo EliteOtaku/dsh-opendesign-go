@@ -3,11 +3,13 @@ import {
   DEFAULT_REASONING_EFFORT,
   MAX_CONTEXT_WINDOW,
   MAX_MAX_TOKENS,
+  isModelEnabled,
   MIN_CONTEXT_WINDOW,
   MIN_MAX_TOKENS,
   MODEL_DEFAULTS,
   REASONING_EFFORTS,
   paramsOf,
+  parseEnabledModels,
   parseModelParams,
 } from '../src/model-params.ts'
 
@@ -83,6 +85,28 @@ describe('paramsOf', () => {
   it('exposes the documented bounds', () => {
     expect(MIN_CONTEXT_WINDOW).toBeLessThan(MAX_CONTEXT_WINDOW)
     expect(MAX_MAX_TOKENS).toBeGreaterThan(MIN_MAX_TOKENS)
+  })
+})
+
+describe('enabled models', () => {
+  it('treats an empty list as all enabled', () => {
+    // A fresh install has an empty field; reading it as "none" would blank the
+    // picker with no explanation.
+    expect(parseEnabledModels('')).toEqual([])
+    expect(isModelEnabled('deepseek-v4.1-flash', [])).toBe(true)
+  })
+
+  it('reads an explicit list and filters by it', () => {
+    const enabled = parseEnabledModels(JSON.stringify(['a', 'b']))
+    expect(enabled).toEqual(['a', 'b'])
+    expect(isModelEnabled('a', enabled)).toBe(true)
+    expect(isModelEnabled('c', enabled)).toBe(false)
+  })
+
+  it('ignores malformed text rather than disabling everything', () => {
+    expect(parseEnabledModels('{')).toEqual([])
+    expect(parseEnabledModels('{"a":1}')).toEqual([])
+    expect(parseEnabledModels('[1,"b",null]')).toEqual(['b'])
   })
 })
 
