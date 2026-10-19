@@ -67,6 +67,7 @@ export const PlainConfig: z<OpenDesignConfig> = z.object({
   autoSwitch: z.boolean().default(false),
   sessionRef: z.string().default(''),
   workspaceId: z.string().default(''),
+  usageJson: z.string().default(''),
   baseURL: z.string().default(DEFAULT_BASE_URL),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -92,6 +93,7 @@ export const Config = z.object({
   autoSwitch: z.boolean().default(false).volatile(),
   sessionRef: z.string().default('').volatile(),
   workspaceId: z.string().default('').volatile(),
+  usageJson: z.string().default('').volatile(),
   baseURL: z.string().default(DEFAULT_BASE_URL).volatile(),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS).volatile(),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS).volatile(),
@@ -117,6 +119,8 @@ export interface LiveConfig {
   readonly sessionRef: { get(): string }
   /** Console workspace id used when the selected account declares none. */
   readonly workspaceId: { get(): string }
+  /** Serialized last quota reading; empty when nothing has been read. */
+  readonly usageJson: { get(): string }
   /** Inference base URL, stored as configured. */
   readonly baseURL: { get(): string }
   /** Deadline for one dispatch. */
@@ -138,6 +142,7 @@ export function readConfig(config: LiveConfig): OpenDesignConfig {
     autoSwitch: config.autoSwitch.get(),
     sessionRef: config.sessionRef.get(),
     workspaceId: config.workspaceId.get(),
+    usageJson: config.usageJson.get(),
     baseURL: migrateGatewayBaseURL(config.baseURL.get()),
     requestTimeoutMs: config.requestTimeoutMs.get(),
     streamIdleTimeoutMs: config.streamIdleTimeoutMs.get(),

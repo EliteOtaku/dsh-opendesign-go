@@ -25,7 +25,7 @@ import { DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract
 import type { OpenDesignConfig } from './config-contract.ts'
 import { listSeedModels } from './catalog.ts'
 import { accountsOf, assertAccounts } from './accounts.ts'
-import { installHostSettings } from './host-settings.ts'
+import { installHostSettings, usageWriterOf } from './host-settings.ts'
 import { OpenDesignUsageService, sessionResolverOf } from './usage.ts'
 import { DEFAULT_SESSION_REF } from './config-contract.ts'
 
@@ -92,6 +92,46 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   // service's `describe()` and leaves its page stuck on "unavailable".
   ctx.provide('openDesignGoUsage')
   ctx.set('openDesignGoUsage', usage)
+
+  /**
+   * Read the quota channel and publish the result into the config document,
+   * which is the channel the page already receives.
+   *
+   * A failure is published too: the page can then say why it has no numbers
+   * instead of showing a stale reading with no explanation.
+   */
+  const refreshUsage = async (): Promise<void> => {
+    const write = usageWriterOf(ctx)
+    if (write === undefined) return
+    const snapshot = await usage.read()
+    await write(JSON.stringify(snapshot))
+    ctx.logger.info(`llm-opendesign-go: quota ${usage.describe(snapshot)}`)
+  }
+
+  /** Refresh on start and whenever the session or workspace changes. */
+  const refreshIfConfigured = (): void => {
+    const config = current()
+    if (config.sessionRef.length === 0) return
+    if (config.workspaceId.length === 0 && !config.accounts?.some((row) => row.workspaceId)) return
+    void refreshUsage().catch((error: unknown) => {
+      ctx.logger.warn(`llm-opendesign-go: quota refresh failed (${String(error)})`)
+    })
+  }
+  refreshIfConfigured()
+  let lastUsageKey = `${current().sessionRef}|${current().workspaceId}`
+  ctx.effect(() => {
+    // The config document has no change event on this host, so the same values
+    // are compared on a short timer. The interval is deliberately coarse: the
+    // console calls cost real requests and a quota bar does not need seconds.
+    const timer = setInterval(() => {
+      const config = current()
+      const key = `${config.sessionRef}|${config.workspaceId}`
+      if (key === lastUsageKey) return
+      lastUsageKey = key
+      refreshIfConfigured()
+    }, 5_000)
+    return () => { clearInterval(timer) }
+  })
 
   /**
    * Resolve one account's key through the credentials seam, falling back to the

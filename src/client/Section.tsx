@@ -12,13 +12,14 @@
  *
  * @module dsh-opendesign-go/client/Section
  */
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
 import { PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
 import type { UsageSnapshot } from '../usage-contract.ts'
+import { parseUsage } from '../usage-contract.ts'
 import { QuotaCard } from './QuotaCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 
@@ -26,11 +27,6 @@ import { AccountsCard } from './AccountsCard.tsx'
 export interface OpenDesignSectionInjected {
   /** Live config form bound to this plugin's profile entry. */
   readonly form: ConfigForm<OpenDesignConfig>
-  /**
-   * Reads the quota channel. Absent on a host that does not mount the remote,
-   * in which case the page shows that quota is unavailable rather than failing.
-   */
-  readonly readUsage?: () => Promise<UsageSnapshot>
 }
 
 const pageStyle = {
@@ -95,7 +91,7 @@ const inputStyle = {
  * @param props - injected config form and optional quota reader.
  * @returns the page body.
  */
-export function OpenDesignSection({ form, readUsage }: OpenDesignSectionInjected): ReactElement {
+export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactElement {
   const snapshot = useSyncExternalStore(
     (listener) => form.subscribe(listener),
     () => form.getSnapshot(),
@@ -103,34 +99,24 @@ export function OpenDesignSection({ form, readUsage }: OpenDesignSectionInjected
   const value = snapshot.value
   const enabled = value?.enabled ?? true
   const editable = snapshot.status === 'ready' && snapshot.writable
-  const [usage, setUsage] = useState<UsageSnapshot | undefined>(undefined)
-  const [usageLoading, setUsageLoading] = useState(false)
   const sessionRef = value?.sessionRef ?? ''
+  // The host publishes each quota reading into the config document, which this
+  // page already receives; parsing it here needs no second transport and keeps
+  // one source of truth.
+  const usage = useMemo(() => parseUsage(value?.usageJson), [value?.usageJson])
+  const usageLoading = false
 
-  /** Read the quota channel once and keep the result, including its failure state. */
+  /**
+   * Ask the host for a fresh reading.
+   *
+   * The page cannot read the console itself (it holds no session), so this only
+   * nudges the host: writing the same values re-arms its watcher, and the new
+   * snapshot arrives through the config mirror.
+   */
   const loadUsage = (): void => {
-    if (readUsage === undefined) return
-    setUsageLoading(true)
-    void readUsage()
-      .then((next) => { setUsage(next) })
-      .catch((error: unknown) => {
-        setUsage({
-          asOf: new Date().toISOString(),
-          tier: '',
-          eligible: false,
-          windows: [],
-          error: error instanceof Error ? error.message : String(error),
-        })
-      })
-      .finally(() => { setUsageLoading(false) })
+    if (!editable) return
+    void form.set('sessionRef', sessionRef)
   }
-
-  // Read once the console session reference exists: reading without it would
-  // only produce a "not configured" snapshot.
-  useEffect(() => {
-    if (sessionRef.length > 0 && readUsage !== undefined) loadUsage()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- read once per session ref change
-  }, [sessionRef])
 
   /**
    * Flip the route switch. A refusal is surfaced instead of swallowed: the

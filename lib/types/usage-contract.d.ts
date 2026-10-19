@@ -70,3 +70,13 @@ export declare function creditsToNumber(value: string): number | null;
  * @returns 0–100, or null when the limit is zero or unparseable.
  */
 export declare function percentUsedOf(usedCredits: string, limitCredits: string): number | null;
+/**
+ * Read a cached reading back from the config document.
+ *
+ * The value crosses a document the user can edit, so every field is validated
+ * and a malformed cache degrades to "no reading" rather than rendering
+ * nonsense. An absent or empty string is the normal "never read" state.
+ * @param raw - serialized snapshot, or empty string.
+ * @returns the snapshot, or undefined when absent or unusable.
+ */
+export declare function parseUsage(raw: string | undefined): UsageSnapshot | undefined;

@@ -71,6 +71,10 @@ export interface LiveConfig {
     readonly workspaceId: {
         get(): string;
     };
+    /** Serialized last quota reading; empty when nothing has been read. */
+    readonly usageJson: {
+        get(): string;
+    };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {
         get(): string;

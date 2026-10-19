@@ -64,6 +64,16 @@ export interface OpenDesignConfig {
     readonly sessionRef: string;
     /** Console workspace id used when the selected account declares none. */
     readonly workspaceId: string;
+    /**
+     * Serialized last quota reading, written by the host after a successful
+     * console read and rendered by the page.
+     *
+     * This is a cache, not configuration the user edits: it travels through the
+     * config document because that is the one channel both faces already share,
+     * and it lets the page show the last known numbers before a fresh read lands.
+     * An empty string means nothing has been read yet.
+     */
+    readonly usageJson: string;
     /** Inference base URL without a trailing slash. */
     readonly baseURL: string;
     /** Deadline for one dispatch, spanning discovery through streaming. */

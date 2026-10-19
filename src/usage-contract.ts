@@ -92,3 +92,63 @@ export function percentUsedOf(usedCredits: string, limitCredits: string): number
   if (used === null || limit === null || limit <= 0) return null
   return Math.min(100, Math.max(0, Math.round((used / limit) * 100)))
 }
+
+/**
+ * Read a cached reading back from the config document.
+ *
+ * The value crosses a document the user can edit, so every field is validated
+ * and a malformed cache degrades to "no reading" rather than rendering
+ * nonsense. An absent or empty string is the normal "never read" state.
+ * @param raw - serialized snapshot, or empty string.
+ * @returns the snapshot, or undefined when absent or unusable.
+ */
+export function parseUsage(raw: string | undefined): UsageSnapshot | undefined {
+  if (raw === undefined || raw.length === 0) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+  if (parsed === null || typeof parsed !== 'object') return undefined
+  const row = parsed as Record<string, unknown>
+  if (typeof row.asOf !== 'string' || typeof row.tier !== 'string' || typeof row.eligible !== 'boolean') return undefined
+  if (!Array.isArray(row.windows)) return undefined
+  const windows: QuotaWindow[] = []
+  for (const entry of row.windows) {
+    if (entry === null || typeof entry !== 'object') continue
+    const window = entry as Record<string, unknown>
+    if (typeof window.durationSeconds !== 'number' || typeof window.usedCredits !== 'string'
+      || typeof window.limitCredits !== 'string' || typeof window.remainingCredits !== 'string'
+      || typeof window.resetsAt !== 'string') continue
+    windows.push({
+      status: window.status === 'unknown' ? 'unknown' : 'ok',
+      durationSeconds: window.durationSeconds,
+      usedCredits: window.usedCredits,
+      limitCredits: window.limitCredits,
+      remainingCredits: window.remainingCredits,
+      percentUsed: typeof window.percentUsed === 'number' ? window.percentUsed : null,
+      resetsAt: window.resetsAt,
+    })
+  }
+  const result: UsageSnapshot = {
+    asOf: row.asOf,
+    tier: row.tier,
+    eligible: row.eligible,
+    windows,
+    ...(typeof row.error === 'string' ? { error: row.error } : {}),
+  }
+  const wallet = row.wallet
+  if (wallet !== null && typeof wallet === 'object') {
+    const walletRow = wallet as Record<string, unknown>
+    if (typeof walletRow.balanceUsd === 'string') {
+      return {
+        ...result,
+        wallet: typeof walletRow.subscriptionPeriodEnd === 'string'
+          ? { balanceUsd: walletRow.balanceUsd, subscriptionPeriodEnd: walletRow.subscriptionPeriodEnd }
+          : { balanceUsd: walletRow.balanceUsd },
+      }
+    }
+  }
+  return result
+}

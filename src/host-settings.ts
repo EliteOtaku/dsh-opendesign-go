@@ -18,6 +18,12 @@ import { PROFILE_ENTRY_ID } from './config-contract.ts'
 interface ProfileSettings {
   /** Opt this entry's config into profile editing without an automatic schema. */
   configure(presentation: { auto: boolean }, owner: unknown): () => void
+  /** Current profile accepts edits. */
+  readonly writable?: boolean
+  /** Read one entry's form, including the revision a write must fence against. */
+  describe?(options?: unknown): { ns: string, revision: number }[]
+  /** Merge fields into one entry's config. */
+  update?(ns: string, patch: object, expectedRevision?: number): Promise<void>
 }
 
 /**
@@ -43,8 +49,9 @@ export function installHostSettings(ctx: Context): void {
       // all, and which namespaces did. A page receiving no mirror is otherwise
       // indistinguishable from a plugin that failed to activate.
       const writable = (settings as { writable?: boolean }).writable
-      const describe = (settings as { describe?: (options?: unknown) => { ns: string, autoGenerate: boolean }[] }).describe
-      const rows = typeof describe === 'function' ? describe.call(settings) : []
+      const rows = typeof settings.describe === 'function'
+        ? (settings.describe.call(settings) as { ns: string, autoGenerate?: boolean }[])
+        : []
       const own = rows.find((row) => row.ns === PROFILE_ENTRY_ID)
       ctx.logger.info(
         `llm-opendesign-go: settings attached (writable=${String(writable)}, forms=${rows.length}, `
@@ -54,6 +61,37 @@ export function installHostSettings(ctx: Context): void {
       return dispose
     })
   })
+}
+
+/**
+ * Expose a writer for the quota cache.
+ *
+ * The page reads `usageJson` from the config mirror, so the host publishes a
+ * reading by writing that field. Keeping the write here means the plugin never
+ * keeps a second copy of the quota state: one document, one source of truth.
+ * @param ctx - host context that may carry a settings service.
+ * @returns a writer, or undefined when this host cannot write settings.
+ */
+export function usageWriterOf(ctx: Context): ((json: string) => Promise<void>) | undefined {
+  const settings = ctx.get('settings') as ProfileSettings | undefined
+  if (settings === undefined || typeof settings.update !== 'function'
+    || typeof settings.describe !== 'function' || settings.writable !== true) return undefined
+  return async (json: string) => {
+    // Fence on the revision just read: a concurrent edit from the page must win
+    // rather than be silently overwritten by a quota refresh.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const row = settings.describe!().find((candidate) => candidate.ns === PROFILE_ENTRY_ID)
+      if (row === undefined) return
+      try {
+        await settings.update!(PROFILE_ENTRY_ID, { usageJson: json }, row.revision)
+        return
+      } catch (error) {
+        if (attempt === 2) {
+          ctx.logger.warn(`llm-opendesign-go: could not cache the quota reading (${String(error)})`)
+        }
+      }
+    }
+  }
 }
 
 /**
