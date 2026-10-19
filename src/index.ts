@@ -331,7 +331,9 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     publishDiagnostics(configured, triedRef)
   }
 
-  const syncRoute = (): void => {
+  const syncRoute = (
+    resolve: (ref: string) => Promise<string | undefined> = resolveApiKey,
+  ): void => {
     const check = ++routeCheck
     // The route's presence follows the selected account: with auto-switch on,
     // any configured account could serve a request, so any of them counts.
@@ -340,7 +342,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       ? accountsOf(config).map((account) => account.apiKeyEnv)
       : [config.apiKeyEnv]
     const anyRef = refs[0] ?? config.apiKeyEnv
-    void resolveApiKey(anyRef)
+    void resolve(anyRef)
       .then((key) => {
         if (check !== routeCheck) return
         applyRoute(key !== undefined, anyRef)
@@ -362,16 +364,21 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   })
 
   ctx.inject(['credentials'], (credentialsCtx) => {
+    // Resolve through the injected context, not the outer one: a service is only
+    // readable on a context that declared it, and `ctx.get` on the outer context
+    // answers `undefined` even while the credential is stored. That reads as
+    // "credential unresolved" and leaves the route unregistered for good — the
+    // model list then looks absent rather than broken.
+    const resolveVia = async (ref: string): Promise<string | undefined> => {
+      const hit = (await credentialsCtx.credentials.resolve(credentialRef(ref)))?.value
+      if (hit === undefined || hit.length === 0) return undefined
+      return assertUsableApiKey(hit, name, ref)
+    }
     credentialsCtx.on('credentials/reference-updated', (ref) => {
-      if (ref === current().apiKeyEnv) syncRoute()
+      if (ref === current().apiKeyEnv) syncRoute(resolveVia)
     })
-    syncRoute()
+    syncRoute(resolveVia)
   })
-
-  // The seam may already be active when this plugin applies, in which case the
-  // inject above runs synchronously; a key stored later flips the route through
-  // the reference-updated listener.
-  syncRoute()
 }
 
 /** Re-exported so composition patches can list the seed without importing internals. */
