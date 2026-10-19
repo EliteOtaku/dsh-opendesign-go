@@ -49,6 +49,17 @@ export interface OpenDesignAdapterOptions {
         accountRef: string;
         usage: TokenUsage;
     }) => void;
+    /**
+     * Turn one durable image reference into an inline data URL.
+     *
+     * Absent means this host has no attachment service, so image content projects
+     * to the harness placeholder text instead of bytes. The resolver is asked only
+     * for models whose catalog entry declares the image modality, so a text-only
+     * model never receives image bytes.
+     * @param attachment - the durable reference carried by an image block.
+     * @returns a `data:` URL, or undefined when the bytes are not readable.
+     */
+    imageDataUrl?: (attachment: unknown) => string | undefined;
 }
 /**
  * Stream one model call.
@@ -96,13 +107,6 @@ export declare class OpenDesignAdapter extends LlmAdapter {
      * @returns provider/model identity plus resolved parameters.
      */
     resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
-    /**
-     * Stream one Chat Completions call.
-     * @param options - fully assembled request.
-     * @returns the translated chunk stream.
-     * @throws LlmError - classified gateway failure, missing credential, or an
-     * empty response.
-     */
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
 }
 /**

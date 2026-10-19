@@ -32,6 +32,7 @@ import { locateVela } from './vela-locate.ts'
 import { readVelaUsage } from './vela-billing.ts'
 import type { RouteDiagnostics } from './diagnostics.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { UsageSnapshot } from './usage-contract.ts'
@@ -262,9 +263,52 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   let registration: AdapterRegistrationHandle | undefined
   let routeCheck = 0
 
+  /**
+   * Guess a media type from a normalized attachment's extension.
+   *
+   * The attachment service normalizes to a small set of formats, so an
+   * extension map is enough; an unknown extension falls back to PNG because the
+   * service re-encodes to it when the input format is not one it preserves.
+   * @param path - absolute path to normalized bytes.
+   * @returns the media type to declare.
+   */
+  const mediaTypeOf = (path: string): string => {
+    const lower = path.toLowerCase()
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+    if (lower.endsWith('.webp')) return 'image/webp'
+    if (lower.endsWith('.gif')) return 'image/gif'
+    return 'image/png'
+  }
+
+  /**
+   * Resolve one durable image reference to an inline data URL.
+   *
+   * The attachment service owns normalized bytes; the adapter cannot read them
+   * any other way, and the harness keeps no copy in the request. Bytes are read
+   * synchronously because projection is synchronous — the files are small
+   * normalized rasters and this runs once per image per request.
+   */
+  const imageDataUrl = (attachment: unknown): string | undefined => {
+    const attachments = ctx.get('attachments') as {
+      imageHostPath?: (ref: unknown) => string | undefined
+    } | undefined
+    if (attachments === undefined || typeof attachments.imageHostPath !== 'function') return undefined
+    const path = attachments.imageHostPath(attachment)
+    if (path === undefined || path.length === 0) return undefined
+    try {
+      const bytes = readFileSync(path)
+      const media = mediaTypeOf(path)
+      return `data:${media};base64,${bytes.toString('base64')}`
+    } catch (error) {
+      ctx.logger.warn(`llm-opendesign-go: could not read image bytes (${String(error)})`)
+      return undefined
+    }
+  }
+
   const adapter = new OpenDesignAdapter({
     config: current,
     resolveApiKey,
+    imageDataUrl,
     onAccountSettled: (ref) => {
       // Promote a fallback account only after it produced output. The write goes
       // through the same config field the page edits, so the ordering the user

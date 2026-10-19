@@ -2,14 +2,15 @@
  * Project the harness request vocabulary onto OpenAI Chat Completions wire
  * shapes.
  *
- * M2 speaks Chat Completions only: images, files and deferred tool
- * declarations arrive in later milestones, so this module names what it cannot
- * carry instead of dropping it silently. The functions here are pure, so the
+ * Chat Completions carries images as `content` parts rather than a string, so a
+ * message with images projects to an array while a text-only one keeps the
+ * simpler string form. Deferred tool declarations are still named as
+ * unsupported rather than dropped silently. The functions here are pure, so the
  * mapping is testable without a gateway.
  *
  * @module dsh-opendesign-go/conversion
  */
-import { LlmError } from '@deepseek-ai/dsh-llm'
+import { LlmError, textOnlyImageText } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, RequestMessage, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { GATEWAY_CODES } from './gateway-error.ts'
 
@@ -23,13 +24,37 @@ interface ChatToolCall {
   }
 }
 
+/** One `image_url` content part. */
+interface ChatImagePart {
+  readonly type: 'image_url'
+  readonly image_url: { readonly url: string }
+}
+
+/** One `text` content part, used only when a message also has images. */
+interface ChatTextPart {
+  readonly type: 'text'
+  readonly text: string
+}
+
+/** Content is a bare string unless the message carries images. */
+type ChatContent = string | readonly (ChatTextPart | ChatImagePart)[]
+
 /** One Chat Completions message; only the fields this adapter emits. */
 interface ChatMessage {
   readonly role: 'system' | 'user' | 'assistant' | 'tool'
-  readonly content: string
+  readonly content: ChatContent
   readonly tool_calls?: readonly ChatToolCall[]
   readonly tool_call_id?: string
 }
+
+/**
+ * Resolve one durable image reference to an inline data URL.
+ *
+ * The harness stores normalized bytes on disk, so the adapter reads them and
+ * base64-encodes them: Chat Completions accepts `data:` URLs for `image_url`
+ * and this avoids depending on a host-visible upload endpoint.
+ */
+export type ImageDataUrlResolver = (attachment: unknown) => string | undefined
 
 /** One `tools[]` declaration. */
 interface ChatTool {
@@ -51,17 +76,27 @@ function unsupportedBlock(message: string): LlmError {
 }
 
 /**
- * Read the visible text of one block list.
+ * Split one block list into visible text and inline images.
  *
  * Reasoning is deliberately not echoed back: the provider derives it per
  * request and rejects a client-supplied copy. Tool blocks are projected by the
- * caller, so they contribute no text here.
+ * caller, so they contribute nothing here.
+ *
+ * An image the route cannot carry is replaced by its harness placeholder text
+ * rather than throwing: a conversation that already contains an image must stay
+ * usable on a text-only model, and the placeholder names the image and its path
+ * so the model is not silently lied to.
  * @param blocks - model-facing blocks of one message.
- * @param where - role label used in the unsupported-block diagnostic.
- * @returns the concatenated text blocks.
+ * @param resolveImage - turns one durable reference into a data URL, or
+ * undefined when this route cannot carry images.
+ * @returns text and image parts.
  */
-function textOf(blocks: readonly ContentBlock[], where: string): string {
+function partsOf(
+  blocks: readonly ContentBlock[],
+  resolveImage: ImageDataUrlResolver | undefined,
+): { text: string, images: string[] } {
   let text = ''
+  const images: string[] = []
   for (const block of blocks) {
     switch (block.type) {
       case 'text':
@@ -72,28 +107,55 @@ function textOf(blocks: readonly ContentBlock[], where: string): string {
       case 'tool-addition':
       case 'tool-removal':
         break
-      case 'image':
-        throw unsupportedBlock(
-          `OpenDesign Chat Completions cannot carry image content yet (scheduled for M6); the ${where} contains one`,
-        )
+      case 'image': {
+        const url = block.offloaded === true ? undefined : resolveImage?.(block.attachment)
+        if (url === undefined) {
+          const placeholder = textOnlyImageText(block.attachment)
+          text += text.length > 0 ? '\n' + placeholder : placeholder
+        } else {
+          images.push(url)
+        }
+        break
+      }
       case 'file':
         throw unsupportedBlock(
-          `OpenDesign Chat Completions receives files as text handles; the ${where} still carries a raw file block`,
+          'OpenDesign Chat Completions receives files as text handles; a raw file block reached projection',
         )
       default:
         break
     }
   }
-  return text
+  return { text, images }
+}
+
+/**
+ * Build wire content from text and images.
+ *
+ * A text-only message keeps the bare-string form, which every compatible server
+ * accepts; only a message with images needs the parts array.
+ * @param text - visible text.
+ * @param images - data URLs in message order.
+ * @returns wire content.
+ */
+function contentOf(text: string, images: readonly string[]): ChatContent {
+  if (images.length === 0) return text
+  const parts: (ChatTextPart | ChatImagePart)[] = []
+  if (text.length > 0) parts.push({ type: 'text', text })
+  for (const url of images) parts.push({ type: 'image_url', image_url: { url } })
+  return parts
 }
 
 /**
  * Project one assistant message, including its tool calls.
  * @param content - assistant content blocks.
+ * @param resolveImage - route image resolver, absent for text-only routes.
  * @returns the wire message, or undefined when it would carry nothing.
  */
-function assistantMessage(content: readonly ContentBlock[]): ChatMessage | undefined {
-  const text = textOf(content, 'assistant message')
+function assistantMessage(
+  content: readonly ContentBlock[],
+  resolveImage: ImageDataUrlResolver | undefined,
+): ChatMessage | undefined {
+  const { text, images } = partsOf(content, resolveImage)
   const toolCalls: ChatToolCall[] = []
   for (const block of content) {
     if (block.type !== 'tool-call') continue
@@ -106,20 +168,25 @@ function assistantMessage(content: readonly ContentBlock[]): ChatMessage | undef
   // An assistant turn that produced neither visible text nor a tool call
   // (reasoning only) has nothing to replay; providers reject an empty turn.
   if (text === '' && toolCalls.length === 0) return undefined
+  const wireContent = contentOf(text, images)
   return toolCalls.length === 0
-    ? { role: 'assistant', content: text }
-    : { role: 'assistant', content: text, tool_calls: toolCalls }
+    ? { role: 'assistant', content: wireContent }
+    : { role: 'assistant', content: wireContent, tool_calls: toolCalls }
 }
 
 /**
  * Project one request message onto a Chat Completions message.
  * @param message - harness request message.
+ * @param resolveImage - route image resolver, absent for text-only routes.
  * @returns the wire message, or undefined when it would carry nothing.
  */
-function toChatMessage(message: RequestMessage): ChatMessage | undefined {
+function toChatMessage(
+  message: RequestMessage,
+  resolveImage: ImageDataUrlResolver | undefined,
+): ChatMessage | undefined {
   switch (message.role) {
     case 'system': {
-      const text = textOf(message.content, 'system message')
+      const text = partsOf(message.content, undefined).text
       // `''` records "no system prompt"; an empty system message is rejected by
       // strict gateways, so it is not sent at all.
       return text === '' ? undefined : { role: 'system', content: text }
@@ -127,17 +194,19 @@ function toChatMessage(message: RequestMessage): ChatMessage | undefined {
     case 'developer': {
       // Tool additions/removals only matter to deferred declarations (M6); the
       // remaining text is system-level guidance and keeps that meaning.
-      const text = textOf(message.content, 'developer message')
+      const text = partsOf(message.content, undefined).text
       return text === '' ? undefined : { role: 'system', content: text }
     }
     case 'user': {
-      const text = textOf(message.content, 'user message')
-      return text === '' ? undefined : { role: 'user', content: text }
+      const { text, images } = partsOf(message.content, resolveImage)
+      // An image-only turn is legal: it carries no text but still says something.
+      if (text === '' && images.length === 0) return undefined
+      return { role: 'user', content: contentOf(text, images) }
     }
     case 'assistant':
-      return assistantMessage(message.content)
+      return assistantMessage(message.content, resolveImage)
     case 'tool': {
-      const text = textOf(message.content, 'tool message')
+      const text = partsOf(message.content, undefined).text
       // A tool message answers a call, so it is always sent even when empty.
       return { role: 'tool', tool_call_id: message.toolCallId, content: text }
     }
@@ -162,10 +231,13 @@ function mergeSystem(system: string, existing: string): string {
  * @param options - fully assembled request.
  * @returns OpenAI Chat Completions messages, in conversation order.
  */
-export function toChatMessages(options: GenerateOptions): unknown[] {
+export function toChatMessages(
+  options: GenerateOptions,
+  resolveImage?: ImageDataUrlResolver,
+): unknown[] {
   const messages: ChatMessage[] = []
   for (const message of options.messages) {
-    const converted = toChatMessage(message)
+    const converted = toChatMessage(message, resolveImage)
     if (converted !== undefined) messages.push(converted)
   }
 
@@ -173,7 +245,12 @@ export function toChatMessages(options: GenerateOptions): unknown[] {
   if (system !== undefined && system.trim() !== '') {
     const first = messages[0]
     if (first !== undefined && first.role === 'system') {
-      messages[0] = { role: 'system', content: mergeSystem(system, first.content) }
+      // The leading system message is text-only by construction, so its
+      // content is always the bare string this merge expects.
+      messages[0] = {
+        role: 'system',
+        content: mergeSystem(system, typeof first.content === 'string' ? first.content : ''),
+      }
     } else {
       messages.unshift({ role: 'system', content: system })
     }

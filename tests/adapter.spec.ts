@@ -389,22 +389,61 @@ describe('toChatMessages', () => {
     ])
   })
 
-  it('refuses image content with UNSUPPORTED_OPTION', () => {
+  it('projects image content to image_url parts when a resolver is supplied', () => {
     const image = { type: 'image', attachment: { id: 'attachment-1' } } as unknown as ContentBlock
+    const url = 'data:image/png;base64,AAAA'
+    const messages = toChatMessages(
+      {
+        provider: 'dsh-opendesign-go',
+        model: MODEL,
+        messages: [{
+          role: 'user',
+          content: [{ type: 'text', text: 'look' }, image],
+        }],
+      },
+      () => url,
+    ) as { role: string, content: unknown }[]
 
-    let failure: unknown
-    try {
-      toChatMessages({
+    expect(messages[0]?.content).toEqual([
+      { type: 'text', text: 'look' },
+      { type: 'image_url', image_url: { url } },
+    ])
+  })
+
+  it('replaces an image with placeholder text when the route cannot carry it', () => {
+    // A conversation that already contains an image must stay usable on a
+    // text-only model, and the placeholder names the image so the model is not
+    // silently told there was none.
+    const image = { type: 'image', attachment: { id: 'attachment-1' } } as unknown as ContentBlock
+    const messages = toChatMessages({
+      provider: 'dsh-opendesign-go',
+      model: MODEL,
+      messages: [{ role: 'user', content: [image] }],
+    }) as { role: string, content: unknown }[]
+
+    // The harness placeholder is deterministic text naming the attachment, not
+    // the raw block: the point is that the model learns an image existed.
+    const content = String(messages[0]?.content)
+    expect(typeof messages[0]?.content).toBe('string')
+    expect(content).toContain('image omitted')
+    expect(content).toContain('text only')
+  })
+
+  it('keeps an image-only user turn instead of dropping it', () => {
+    const image = { type: 'image', attachment: { id: 'attachment-2' } } as unknown as ContentBlock
+    const messages = toChatMessages(
+      {
         provider: 'dsh-opendesign-go',
         model: MODEL,
         messages: [{ role: 'user', content: [image] }],
-      })
-    } catch (error) {
-      failure = error
-    }
+      },
+      () => 'data:image/png;base64,BBBB',
+    ) as { role: string, content: unknown }[]
 
-    expect(failure).toBeInstanceOf(LlmError)
-    expect(failure).toMatchObject({ code: 'UNSUPPORTED_OPTION' })
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.content).toEqual([
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,BBBB' } },
+    ])
   })
 })
 

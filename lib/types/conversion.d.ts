@@ -1,5 +1,13 @@
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
 /**
+ * Resolve one durable image reference to an inline data URL.
+ *
+ * The harness stores normalized bytes on disk, so the adapter reads them and
+ * base64-encodes them: Chat Completions accepts `data:` URLs for `image_url`
+ * and this avoids depending on a host-visible upload endpoint.
+ */
+export type ImageDataUrlResolver = (attachment: unknown) => string | undefined;
+/**
  * Convert a harness request into Chat Completions `messages`.
  *
  * A one-shot `options.system` becomes the leading system message; when the
@@ -7,7 +15,7 @@ import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
  * @param options - fully assembled request.
  * @returns OpenAI Chat Completions messages, in conversation order.
  */
-export declare function toChatMessages(options: GenerateOptions): unknown[];
+export declare function toChatMessages(options: GenerateOptions, resolveImage?: ImageDataUrlResolver): unknown[];
 /**
  * Convert harness tool schemas into Chat Completions `tools`.
  *

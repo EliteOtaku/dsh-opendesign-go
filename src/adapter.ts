@@ -40,6 +40,7 @@ import { listSeedModels, seedModel } from './catalog.ts'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS, paramsOf } from './model-params.ts'
 import { DISPLAY_NAME, type OpenDesignConfig } from './config-contract.ts'
 import { toChatMessages, toChatTools } from './conversion.ts'
+import type { ImageDataUrlResolver } from './conversion.ts'
 import {
   GATEWAY_CODES,
   classifyGatewayFailure,
@@ -81,6 +82,17 @@ export interface OpenDesignAdapterOptions {
    * @param call - the model, the account that served it, and its usage.
    */
   onUsage?: (call: { model: string, accountRef: string, usage: TokenUsage }) => void
+  /**
+   * Turn one durable image reference into an inline data URL.
+   *
+   * Absent means this host has no attachment service, so image content projects
+   * to the harness placeholder text instead of bytes. The resolver is asked only
+   * for models whose catalog entry declares the image modality, so a text-only
+   * model never receives image bytes.
+   * @param attachment - the durable reference carried by an image block.
+   * @returns a `data:` URL, or undefined when the bytes are not readable.
+   */
+  imageDataUrl?: (attachment: unknown) => string | undefined
 }
 
 /** One text or reasoning block accumulated while streaming. */
@@ -207,6 +219,23 @@ export class OpenDesignAdapter extends LlmAdapter {
    * @throws LlmError - classified gateway failure, missing credential, or an
    * empty response.
    */
+  /**
+   * The image resolver to use for one model, if any.
+   *
+   * Gated on the declared modality: sending image parts to a text-only model is
+   * an error at the provider, and the harness has a placeholder for exactly that
+   * case, so gating here keeps the failure out of the request entirely.
+   * @param model - exact model id.
+   * @returns the resolver, or undefined when this model cannot take images.
+   */
+  #imageResolverFor(model: string): ImageDataUrlResolver | undefined {
+    const resolve = this.#options.imageDataUrl
+    if (resolve === undefined) return undefined
+    const params = paramsOf(model, this.#options.config().modelParams)
+    if (params === undefined || !params.inputModalities.includes('image')) return undefined
+    return resolve
+  }
+
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const config = this.#options.config()
     // Account fallback is decided once, from the same configuration snapshot
@@ -217,7 +246,7 @@ export class OpenDesignAdapter extends LlmAdapter {
     let lastFailure: unknown
     for (const ref of candidates) {
       const apiKey = await this.#apiKey(ref)
-      const response = await dispatch(options, config, apiKey)
+      const response = await dispatch(options, config, apiKey, this.#imageResolverFor(options.model))
       if (!response.ok) {
         lastFailure = classifyGatewayFailure(await readFailure(response))
         // Only a rejected credential or exhausted quota justifies trying the
@@ -289,13 +318,14 @@ async function dispatch(
   options: GenerateOptions,
   config: OpenDesignConfig,
   apiKey: string,
+  resolver: ImageDataUrlResolver | undefined,
 ): Promise<Response> {
   const baseURL = config.baseURL.replace(/\/+$/u, '')
   if (baseURL === '') throw new LlmError('OpenDesign: baseURL is not configured', GATEWAY_CODES.invalidRequest)
 
   const body: Record<string, unknown> = {
     model: options.model,
-    messages: toChatMessages(options),
+    messages: toChatMessages(options, resolver),
     stream: true,
     stream_options: { include_usage: true },
   }
