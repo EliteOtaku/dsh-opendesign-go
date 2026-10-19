@@ -15,6 +15,7 @@ import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { wrapClientModule } from './client-envelope.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const check = process.argv.includes('--check')
@@ -59,18 +60,25 @@ await build({
 
 const clientEntry = join(root, 'src', 'client', 'index.ts')
 if (existsSync(clientEntry)) {
-  await build({
+  // The shell injects client plugins as plain scripts and supplies its own
+  // `require`, so this bundle is CJS wrapped in the module-loader envelope.
+  // An ESM client fails the whole web boot with "Cannot use import statement
+  // outside a module".
+  const cjs = await build({
     entryPoints: [clientEntry],
-    outfile: join(outDir, 'client.js'),
     bundle: true,
-    format: 'esm',
+    format: 'cjs',
     platform: 'browser',
     target: 'es2022',
     jsx: 'automatic',
     external,
     sourcemap: false,
     logLevel: 'warning',
+    write: false,
   })
+  const body = cjs.outputFiles[0]?.text
+  if (body === undefined) throw new Error('client bundle produced no output')
+  writeFileSync(join(outDir, 'client.js'), wrapClientModule(pkg.name, body))
 }
 
 execFileSync(
