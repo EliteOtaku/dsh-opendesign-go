@@ -14,6 +14,11 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis';
  * owns the settings panel. The section declaration is contributed by the
  * settings shell, whose activation order is not constrained, so registration
  * waits through `slots.inject`.
+ *
+ * `remote` grants the Remote transport. The namespace itself is a separate
+ * service that only exists after `$mount` resolves, so it is **not** listed
+ * here: declaring it at this level would park the whole plugin on a service
+ * that does not exist yet. The controller injects it after mounting.
  */
 export declare const inject: string[];
 /**

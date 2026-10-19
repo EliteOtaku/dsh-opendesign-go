@@ -149,7 +149,20 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   ctx.provide(ACCOUNTS_NAMESPACE)
   ctx.set(ACCOUNTS_NAMESPACE, accounts)
   ctx.inject(['typert'], (scope) => {
-    scope.effect(() => scope.typert.remotes.register(accountsRemote))
+    scope.effect(() => {
+      const dispose = scope.typert.remotes.register(accountsRemote)
+      // Prove the descriptor reached the registry: a page that never receives
+      // the namespace is otherwise indistinguishable from one whose mount
+      // failed, and both look like "通道可能未就绪".
+      const registered = scope.typert.remotes
+        .list()
+        .filter((descriptor) => descriptor.service === ACCOUNTS_NAMESPACE)
+        .map((descriptor) => descriptor.method)
+      ctx.logger.info(
+        `llm-opendesign-go: account remote registered (methods=[${registered.join(', ')}])`,
+      )
+      return dispose
+    })
   })
 
   // Local usage ledger: every request this plugin serves, priced with the public

@@ -13,6 +13,8 @@
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis';
 import type { AccountCommand, AccountCommandResult } from '../account-command.ts';
+/** Namespace reference the client must inject before it can be read. */
+export declare const ACCOUNTS_REMOTE = "remote.openDesignGoAccounts";
 /** Executes one command on the host. */
 export type ExecuteAccountCommand = (command: AccountCommand) => Promise<AccountCommandResult>;
 /**

@@ -17,6 +17,9 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { AccountCommand, AccountCommandResult } from '../account-command.ts'
 import { ACCOUNTS_NAMESPACE, accountsRemote } from '../remote-contract.ts'
 
+/** Namespace reference the client must inject before it can be read. */
+export const ACCOUNTS_REMOTE = `remote.${ACCOUNTS_NAMESPACE}`
+
 /** Executes one command on the host. */
 export type ExecuteAccountCommand = (command: AccountCommand) => Promise<AccountCommandResult>
 
@@ -31,14 +34,22 @@ export type ExecuteAccountCommand = (command: AccountCommand) => Promise<Account
  */
 export function accountCommands(ctx: ClientContext): { execute: ExecuteAccountCommand, ready: Promise<unknown> } {
   let execute: ExecuteAccountCommand = async () => 'unknown'
+  // `$mount` resolves once the namespace services exist, so the injection below
+  // is armed only after that: injecting earlier would park the fiber on a
+  // service that does not exist yet and never resolve.
   const ready = ctx.remote.$mount(accountsRemote).then((dispose: () => unknown) => {
     ctx.effect(() => () => { void dispose() })
-    execute = async (command) => {
-      const result = await ctx.remote[ACCOUNTS_NAMESPACE].execute(command)
-      if (!result.ok) return 'unknown'
-      return result.value as AccountCommandResult
-    }
+    ctx.inject([ACCOUNTS_REMOTE], (readyCtx) => {
+      execute = async (command) => {
+        const result = await readyCtx.remote[ACCOUNTS_NAMESPACE].execute(command)
+        if (!result.ok) return 'unknown'
+        return result.value as AccountCommandResult
+      }
+    })
     return undefined
-  }).catch(() => undefined)
+  }).catch((error: unknown) => {
+    ctx.logger.warn?.(`llm-opendesign-go: account channel unavailable (${String(error)})`)
+    return undefined
+  })
   return { execute: (command) => execute(command), ready }
 }
