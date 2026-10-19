@@ -4,6 +4,7 @@ import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   PlainConfig,
+  accountsOfConfig,
   assertApiKeyEnv,
   assertBaseURL,
   migrateGatewayBaseURL,
@@ -32,7 +33,7 @@ function liveConfigOf(values: OpenDesignConfig): LiveConfig {
 const DEFAULTS: OpenDesignConfig = {
   enabled: true,
   apiKeyEnv: DEFAULT_API_KEY_ENV,
-  accounts: null,
+  accounts: [],
   autoSwitch: false,
   baseURL: DEFAULT_BASE_URL,
   requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
@@ -64,10 +65,14 @@ describe('PlainConfig', () => {
     expect(config.baseURL).toBe('https://gateway.example.com/v1')
   })
 
-  it('folds an absent, null, or empty account list to null', () => {
-    expect(PlainConfig().accounts).toBeNull()
-    expect(PlainConfig({ ...DEFAULTS, accounts: null }).accounts).toBeNull()
-    expect(PlainConfig({ ...DEFAULTS, accounts: [] }).accounts).toBeNull()
+  it('folds an absent, null, or empty account list to an empty array', () => {
+    // The schema stays a plain walkable array so the settings service can
+    // project an editable form; callers normalize through accountsOfConfig.
+    expect(PlainConfig().accounts).toEqual([])
+    expect(PlainConfig({ ...DEFAULTS, accounts: [] }).accounts).toEqual([])
+    expect(accountsOfConfig(null)).toBeNull()
+    expect(accountsOfConfig([])).toBeNull()
+    expect(accountsOfConfig([{ id: 'a1', name: 'Primary', apiKeyEnv: 'ACCOUNT_KEY' }])).toHaveLength(1)
   })
 })
 
@@ -139,7 +144,9 @@ describe('migrateGatewayBaseURL', () => {
 
 describe('readConfig', () => {
   it('reads plain values out of the live references', () => {
-    expect(readConfig(liveConfigOf(DEFAULTS))).toEqual(DEFAULTS)
+    // readConfig normalizes an empty account list to null, the contract's
+    // "only apiKeyEnv" meaning; the schema itself keeps a walkable array.
+    expect(readConfig(liveConfigOf(DEFAULTS))).toEqual({ ...DEFAULTS, accounts: null })
   })
 
   it('re-reads the current value on every call', () => {
@@ -159,8 +166,8 @@ describe('readConfig', () => {
   it('resolves the defaults materialized by the Loader schema', () => {
     const live = Config()
     expect(typeof live.enabled.get).toBe('function')
-    expect(live.accounts.get()).toBeNull()
-    expect(readConfig(live)).toEqual(DEFAULTS)
+    expect(live.accounts.get()).toEqual([])
+    expect(readConfig(live)).toEqual({ ...DEFAULTS, accounts: null })
   })
 
   it('keeps an explicit value set through the Loader schema', () => {

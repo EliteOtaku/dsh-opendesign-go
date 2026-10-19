@@ -32,11 +32,26 @@ export function installHostSettings(ctx: Context): void {
   ctx.inject(['settings'], (settingsCtx) => {
     const settings = (settingsCtx as { settings?: Partial<ProfileSettings> }).settings
     if (settings === undefined || typeof settings.configure !== 'function') {
-      ctx.logger.info(
-        `llm-opendesign-go: this host does not expose profile settings; edit "${PROFILE_ENTRY_ID}" in the profile instead`,
+      ctx.logger.warn(
+        `llm-opendesign-go: no profile settings service; the page will stay read-only (entry "${PROFILE_ENTRY_ID}")`,
       )
       return
     }
-    settingsCtx.effect(() => settings.configure!({ auto: false }, ctx.fiber))
+    settingsCtx.effect(() => {
+      const dispose = settings.configure!({ auto: false }, ctx.fiber)
+      // Prove the policy landed: without this line a page that never receives a
+      // describe mirror is indistinguishable from a page whose transport is
+      // merely slow.
+      const writable = (settings as { writable?: boolean }).writable
+      const entries = typeof (settings as { describe?: unknown }).describe === 'function'
+        ? (settings as { describe(options?: unknown): { ns: string }[] }).describe()
+          .map((row) => row.ns)
+        : []
+      ctx.logger.info(
+        `llm-opendesign-go: settings attached (writable=${String(writable)}, entry "${PROFILE_ENTRY_ID}" `
+        + `${entries.includes(PROFILE_ENTRY_ID) ? 'present' : 'ABSENT'} among ${entries.length} forms)`,
+      )
+      return dispose
+    })
   })
 }

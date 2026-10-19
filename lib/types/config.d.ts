@@ -17,6 +17,12 @@ import type { OpenDesignAccount, OpenDesignConfig } from './config-contract.ts';
 export declare const DEFAULT_REQUEST_TIMEOUT_MS = 1800000;
 /** Maximum idle interval while a stream read is outstanding. */
 export declare const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300000;
+/**
+ * Normalize the configured account list.
+ * @param accounts - the stored list, possibly empty.
+ * @returns the list, or `null` when it carries no account.
+ */
+export declare function accountsOfConfig(accounts: readonly OpenDesignAccount[] | null | undefined): readonly OpenDesignAccount[] | null;
 /** Validated configuration data, as exchanged with the settings surface. */
 export declare const PlainConfig: z<OpenDesignConfig>;
 /**

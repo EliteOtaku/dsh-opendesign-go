@@ -38,18 +38,24 @@ const AccountSchema = z.object({
 })
 
 /**
- * The account list, where `null` means "only {@link apiKeyEnv}".
+ * The account list. `null` and an empty list both mean "only {@link apiKeyEnv}".
  *
- * Schemastery treats a nullish `default()` as "no default", so the field
- * defaults to an empty list and the transform folds it back to `null`: an empty
- * list means the same thing as an absent one. The contract declares the
- * resolved list readonly; the parser only ever reads an array, so the schema
- * advertises that shape instead of requiring a mutable copy at every call site.
+ * Kept as a plain `array` schema with no `transform`: the settings service
+ * projects an editable form only from a schema tree it can walk structurally
+ * (`volatileForm` reads `type === 'object'` and recurses through `dict`), and a
+ * `transform` node terminates that walk. Callers normalize `null`/`[]` through
+ * {@link accountsOfConfig} instead, so the wire schema stays walkable.
  */
-const AccountsSchema = z.transform(
-  z.union([z.array(AccountSchema), z.const(null)]),
-  (value) => (value === null || value.length === 0 ? null : value),
-).default([]) as unknown as z<readonly OpenDesignAccount[] | null>
+const AccountsSchema = z.array(AccountSchema).default([]) as unknown as z<readonly OpenDesignAccount[]>
+
+/**
+ * Normalize the configured account list.
+ * @param accounts - the stored list, possibly empty.
+ * @returns the list, or `null` when it carries no account.
+ */
+export function accountsOfConfig(accounts: readonly OpenDesignAccount[] | null | undefined): readonly OpenDesignAccount[] | null {
+  return accounts === undefined || accounts === null || accounts.length === 0 ? null : accounts
+}
 
 /** Validated configuration data, as exchanged with the settings surface. */
 export const PlainConfig: z<OpenDesignConfig> = z.object({
@@ -118,7 +124,7 @@ export function readConfig(config: LiveConfig): OpenDesignConfig {
   return {
     enabled: config.enabled.get(),
     apiKeyEnv: config.apiKeyEnv.get(),
-    accounts: config.accounts.get(),
+    accounts: accountsOfConfig(config.accounts.get()),
     autoSwitch: config.autoSwitch.get(),
     baseURL: migrateGatewayBaseURL(config.baseURL.get()),
     requestTimeoutMs: config.requestTimeoutMs.get(),
