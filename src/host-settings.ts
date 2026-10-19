@@ -82,24 +82,49 @@ export function installHostSettings(ctx: Context): void {
  * @returns a writer for a named field, or undefined when this host cannot write.
  */
 export function fieldWriterOf(ctx: Context): ((field: string, json: string) => Promise<void>) | undefined {
-  const settings = ctx.get('settings') as ProfileSettings | undefined
-  if (settings === undefined || typeof settings.update !== 'function'
-    || typeof settings.describe !== 'function' || settings.writable !== true) return undefined
+  /** Resolve the settings service at write time, not at capture time. */
+  const settingsOf = (): ProfileSettings | undefined => {
+    const settings = ctx.get('settings') as ProfileSettings | undefined
+    if (settings === undefined || typeof settings.update !== 'function'
+      || typeof settings.describe !== 'function' || settings.writable !== true) return undefined
+    return settings
+  }
+  // A host without the service at capture time may still mount it later, so the
+  // writer is always returned and reports failure per call instead of being
+  // absent — an absent writer would be indistinguishable from "nothing to say".
+  if (ctx.get('settings') === undefined) {
+    ctx.logger.info('llm-opendesign-go: settings service not mounted yet; writes will retry')
+  }
   return async (field: string, json: string) => {
-    // Fence on the revision just read: a concurrent edit from the page must win
-    // rather than be silently overwritten by a background refresh.
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    // The entry reaches the projection on the settings service's own schedule,
+    // not at `apply` time, so an early write finds no row yet. Retrying with a
+    // short backoff is what turns "silently never written" into "written a
+    // moment later" — a quota refresh runs once at startup and would otherwise
+    // be lost for the whole session.
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const settings = settingsOf()
+      if (settings === undefined) {
+        await new Promise((resolve) => { setTimeout(resolve, 100 * (attempt + 1)) })
+        continue
+      }
       const row = settings.describe!().find((candidate) => candidate.ns === PROFILE_ENTRY_ID)
-      if (row === undefined) return
+      if (row === undefined) {
+        await new Promise((resolve) => { setTimeout(resolve, 100 * (attempt + 1)) })
+        continue
+      }
       try {
+        // Fence on the revision just read: a concurrent edit from the page must
+        // win rather than be silently overwritten by a background refresh.
         await settings.update!(PROFILE_ENTRY_ID, { [field]: json }, row.revision)
         return
       } catch (error) {
-        if (attempt === 2) {
+        if (attempt === 11) {
           ctx.logger.warn(`llm-opendesign-go: could not cache ${field} (${String(error)})`)
         }
+        await new Promise((resolve) => { setTimeout(resolve, 100 * (attempt + 1)) })
       }
     }
+    ctx.logger.warn(`llm-opendesign-go: gave up caching ${field} after 12 attempts`)
   }
 }
 

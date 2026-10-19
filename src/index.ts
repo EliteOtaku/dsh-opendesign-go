@@ -32,8 +32,12 @@ import { locateVela } from './vela-locate.ts'
 import { readVelaUsage } from './vela-billing.ts'
 import type { RouteDiagnostics } from './diagnostics.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { homedir } from 'node:os'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { UsageSnapshot } from './usage-contract.ts'
+
+/** How often a failed quota read is retried before giving up for the session. */
+const MAX_USAGE_RETRIES = 6
 
 /** Local usage report window: the trailing 30 days. */
 const REPORT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
@@ -116,9 +120,9 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * A failure is published too: the page can then say why it has no numbers
    * instead of showing a stale reading with no explanation.
    */
-  const refreshUsage = async (): Promise<void> => {
+  const refreshUsage = async (): Promise<UsageSnapshot | undefined> => {
     const write = fieldWriterOf(ctx)
-    if (write === undefined) return
+    if (write === undefined) return undefined
     const config = current()
     let snapshot: UsageSnapshot
     if (config.useVelaCredential) {
@@ -129,7 +133,9 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
           tier: '',
           eligible: false,
           windows: [],
-          error: '未找到 OpenDesign 桌面端的 vela 命令行；安装并登录 OpenDesign 后即可自动读取',
+          error: '未找到 vela 命令行。'
+            + `（home=${homedir()} LOCALAPPDATA=${process.env.LOCALAPPDATA ?? 'unset'}）`
+            + '安装并登录 OpenDesign 桌面端后即可自动读取。',
         }
       } else {
         ctx.logger.info(`llm-opendesign-go: reading quota via vela (${vela.via}) ${vela.path}`)
@@ -140,6 +146,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     }
     await write('usageJson', JSON.stringify(snapshot))
     ctx.logger.info(`llm-opendesign-go: quota ${usage.describe(snapshot)}`)
+    return snapshot
   }
 
   /** Whether this configuration asks for a quota read at all. */
@@ -150,15 +157,31 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     return config.workspaceId.length > 0 || config.accounts?.some((row) => row.workspaceId) === true
   }
 
-  /** Refresh on start and whenever the quota settings change. */
-  const refreshIfConfigured = (): void => {
-    if (!wantsUsage()) return
-    void refreshUsage().catch((error: unknown) => {
+  /**
+   * Refresh the quota reading, replacing what is stored.
+   *
+   * The outcome is returned so the caller can tell a usable reading from a
+   * failed one: a startup attempt can lose a race against the settings service
+   * or the CLI probe, and treating that as success would leave the bar empty
+   * for the whole session.
+   */
+  const refreshIfConfigured = async (): Promise<UsageSnapshot | undefined> => {
+    if (!wantsUsage()) return undefined
+    try {
+      return await refreshUsage()
+    } catch (error) {
       ctx.logger.warn(`llm-opendesign-go: quota refresh failed (${String(error)})`)
-    })
+      return undefined
+    }
   }
-  refreshIfConfigured()
+
+  /** A reading that answered with numbers is final; anything else may recover. */
+  const usable = (snapshot: UsageSnapshot | undefined): boolean =>
+    snapshot !== undefined && snapshot.error === undefined && snapshot.windows.length > 0
+
+  void refreshIfConfigured()
   let lastUsageKey = `${current().useVelaCredential}|${current().sessionRef}|${current().workspaceId}`
+  let retries = 0
   ctx.effect(() => {
     // The config document has no change event on this host, so the same values
     // are compared on a short timer. The interval is deliberately coarse: each
@@ -167,9 +190,18 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     const timer = setInterval(() => {
       const config = current()
       const key = `${config.useVelaCredential}|${config.sessionRef}|${config.workspaceId}`
-      if (key === lastUsageKey) return
-      lastUsageKey = key
-      refreshIfConfigured()
+      const changed = key !== lastUsageKey
+      if (changed) {
+        lastUsageKey = key
+        retries = 0
+      }
+      // `changed` forces a read; otherwise retry only while the last attempt
+      // produced nothing usable, and only a few times.
+      if (!changed && (retries >= MAX_USAGE_RETRIES || !wantsUsage())) return
+      if (!changed) retries += 1
+      void refreshIfConfigured().then((snapshot) => {
+        if (usable(snapshot)) retries = MAX_USAGE_RETRIES
+      })
     }, 5_000)
     return () => { clearInterval(timer) }
   })

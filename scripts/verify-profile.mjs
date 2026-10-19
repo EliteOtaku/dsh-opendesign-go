@@ -76,6 +76,19 @@ check('dependency declared', dependency !== undefined, dependency ?? 'missing fr
 check('node_modules present', existsSync(installedDir), existsSync(installedDir) ? installedDir : 'not installed')
 check('bundle registered', bundles.includes(PACKAGE), bundles.includes(PACKAGE) ? 'listed in dsh.profile.bundles' : 'missing from dsh.profile.bundles')
 
+// Build output must reach the profile. A package directory that exists but has
+// no lib/ loads as a plugin with no entry, which the Host shows as a surface
+// that does nothing — the hardest kind of failure to attribute.
+if (existsSync(installedDir)) {
+  const missingArtifacts = ['index.js', 'client.js']
+    .filter((name) => !existsSync(join(installedDir, 'lib', name)))
+  check(
+    'build artifacts present',
+    missingArtifacts.length === 0,
+    missingArtifacts.length === 0 ? 'index.js + client.js' : `missing lib/${missingArtifacts.join(', lib/')}`,
+  )
+}
+
 if (existsSync(installedDir)) {
   const require = createRequire(join(installedDir, 'lib', 'index.js'))
   const runtimeDeps = runtimeDepsOf()

@@ -72,7 +72,8 @@
     "test:ci": "npm run check:dist && vitest run && npm run verify:load",
     "prepublishOnly": "npm run check:dist",
     "sync:profile": "node scripts/sync-profile.mjs --profile desktop",
-    "sync:link": "node scripts/sync-profile.mjs --profile desktop --link"
+    "sync:link": "node scripts/sync-profile.mjs --profile desktop --link",
+    "link:profile": "node scripts/link-profile.mjs --profile desktop"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.2",
