@@ -47,10 +47,32 @@ interface AccountRow {
   workspaceId?: string
 }
 
+/** One namespace row as `settings.describe` reports it. */
+interface NamespaceRow {
+  readonly ns: string
+  readonly revision: number
+  readonly value?: { accounts?: AccountRow[], apiKeyEnv?: string }
+}
+
+/** The `settings.describe` result: writability plus one view per namespace. */
+interface DescribeResult {
+  readonly writable: boolean
+  readonly hasDocument: boolean
+  readonly namespaces: readonly NamespaceRow[]
+}
+
 /** The subset of the settings namespace this page uses. */
 interface SettingsRemote {
   update(ns: string, patch: object, expectedRevision?: number): Promise<unknown>
-  get(ns: string): Promise<{ readonly revision: number, readonly value?: { accounts?: AccountRow[], apiKeyEnv?: string } }>
+  /**
+   * Every namespace, in one call.
+   *
+   * There is no per-namespace read: the Host publishes `describe` and `update`,
+   * and nothing else. Two details here were both wrong at first and both made
+   * every command fail while the channel reported itself ready — there is no
+   * `get`, and `describe` answers an object carrying `namespaces`, not an array.
+   */
+  describe(): Promise<DescribeResult>
 }
 
 /**
@@ -80,6 +102,20 @@ export function accountCommands(ctx: ClientContext): {
   })
 
   /**
+   * Read this plugin's own namespace row.
+   *
+   * `describe` returns every namespace, so the row is selected by name. A
+   * missing row means the entry is not registered yet, which is a real state
+   * rather than an error.
+   * @returns the row, or undefined when this entry is absent.
+   */
+  const readEntry = async (): Promise<NamespaceRow | undefined> => {
+    if (settings === undefined) return undefined
+    const described = await settings.describe()
+    return described.namespaces.find((row) => row.ns === PROFILE_ENTRY_ID)
+  }
+
+  /**
    * Merge fields into the plugin's entry, fencing on the revision just read.
    * @param patch - fields to merge.
    * @returns the outcome.
@@ -87,7 +123,8 @@ export function accountCommands(ctx: ClientContext): {
   const writeEntry = async (patch: object): Promise<AccountCommandResult> => {
     if (settings === undefined) return 'unknown'
     try {
-      const current = await settings.get(PROFILE_ENTRY_ID)
+      const current = await readEntry()
+      if (current === undefined) return 'rejected'
       await settings.update(PROFILE_ENTRY_ID, patch, current.revision)
       return 'applied'
     } catch (error) {
@@ -104,10 +141,15 @@ export function accountCommands(ctx: ClientContext): {
     let accounts: AccountRow[] = []
     let selected = ''
     try {
-      const row = await settings.get(PROFILE_ENTRY_ID)
-      accounts = row.value?.accounts ?? []
-      selected = row.value?.apiKeyEnv ?? ''
+      const row = await readEntry()
+      accounts = row?.value?.accounts ?? []
+      selected = row?.value?.apiKeyEnv ?? ''
+      if (row === undefined) {
+        stage = `entry "${PROFILE_ENTRY_ID}" absent from describe()`
+        return 'unknown'
+      }
     } catch (error) {
+      stage = `describe failed: ${String(error)}`
       ctx.logger.warn?.(`llm-opendesign-go: could not read settings (${String(error)})`)
       return 'unknown'
     }
