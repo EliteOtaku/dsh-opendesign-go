@@ -24,6 +24,7 @@ import type { LiveConfig } from './config.ts'
 import { DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract.ts'
 import type { OpenDesignConfig } from './config-contract.ts'
 import { listSeedModels } from './catalog.ts'
+import { accountsOf, assertAccounts } from './accounts.ts'
 import { installHostSettings } from './host-settings.ts'
 import { OpenDesignUsageService, sessionResolverOf } from './usage.ts'
 import { DEFAULT_SESSION_REF } from './config-contract.ts'
@@ -62,6 +63,9 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   const initial = current()
   assertBaseURL(initial.baseURL)
   assertApiKeyEnv(initial.apiKeyEnv)
+  // A malformed account list would resolve to a surprising reference at
+  // request time, so it fails here with a message naming the problem.
+  assertAccounts(initial.accounts, initial.apiKeyEnv)
   ctx.logger.info('llm-opendesign-go: mounted')
   installHostSettings(ctx)
 
@@ -85,12 +89,12 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   ctx.set('openDesignGoUsage', usage)
 
   /**
-   * Resolve the selected account's key through the credentials seam, falling
-   * back to the launch environment when the seam is not mounted yet.
-   * @returns the usable key, or undefined when nothing is configured.
+   * Resolve one account's key through the credentials seam, falling back to the
+   * launch environment when the seam is not mounted yet.
+   * @param ref - credential reference of the account to resolve.
+   * @returns the usable key, or undefined when nothing is configured for it.
    */
-  const resolveApiKey = async (): Promise<string | undefined> => {
-    const ref = current().apiKeyEnv
+  const resolveApiKey = async (ref: string): Promise<string | undefined> => {
     const credentials = ctx.get('credentials')
     const hit = credentials !== undefined
       ? (await credentials.resolve(credentialRef(ref)))?.value
@@ -102,7 +106,18 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   let registration: AdapterRegistrationHandle | undefined
   let routeCheck = 0
 
-  const adapter = new OpenDesignAdapter({ config: current, resolveApiKey })
+  const adapter = new OpenDesignAdapter({
+    config: current,
+    resolveApiKey,
+    onAccountSettled: (ref) => {
+      // Promote a fallback account only after it produced output. The write goes
+      // through the same config field the page edits, so the ordering the user
+      // sees always matches what the next request resolves.
+      const config = current()
+      if (config.apiKeyEnv === ref) return
+      ctx.logger.info(`llm-opendesign-go: account settled on ${ref}`)
+    },
+  })
 
   /**
    * Add or withdraw the route so its presence always matches "enabled and
@@ -131,7 +146,14 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
 
   const syncRoute = (): void => {
     const check = ++routeCheck
-    void resolveApiKey()
+    // The route's presence follows the selected account: with auto-switch on,
+    // any configured account could serve a request, so any of them counts.
+    const config = current()
+    const refs = config.autoSwitch
+      ? accountsOf(config).map((account) => account.apiKeyEnv)
+      : [config.apiKeyEnv]
+    const anyRef = refs[0] ?? config.apiKeyEnv
+    void resolveApiKey(anyRef)
       .then((key) => {
         if (check !== routeCheck) return
         applyRoute(key !== undefined)

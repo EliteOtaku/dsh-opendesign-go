@@ -20,6 +20,7 @@ import { PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
 import type { UsageSnapshot } from '../usage-contract.ts'
 import { QuotaCard } from './QuotaCard.tsx'
+import { AccountsCard } from './AccountsCard.tsx'
 
 /** Props injected into the section by the registering plugin. */
 export interface OpenDesignSectionInjected {
@@ -192,6 +193,8 @@ export function OpenDesignSection({ form, readUsage }: OpenDesignSectionInjected
           />
         </div>
       </div>
+
+      <AccountsCard form={form} config={value} editable={editable} />
 
       <QuotaCard snapshot={usage} loading={usageLoading} />
 

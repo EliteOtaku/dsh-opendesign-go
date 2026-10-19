@@ -15,13 +15,17 @@
  * @module dsh-opendesign-go/adapter
  */
 import {
+  ACCOUNT_QUOTA_EXCEEDED_CODE,
+  INVALID_CREDENTIAL_CODE as INVALID_CREDENTIAL,
   LlmAdapter,
   LlmError,
+  QUOTA_EXCEEDED_CODE,
   ToolCallId,
   assertUsableApiKey,
   attributionHeaders,
   errorChain,
 } from '@deepseek-ai/dsh-llm'
+import { accountsOf } from './accounts.ts'
 import type {
   FinishReason,
   GenerateOptions,
@@ -51,8 +55,20 @@ const PACKAGE_NAME = 'dsh-opendesign-go'
 export interface OpenDesignAdapterOptions {
   /** Current plugin configuration; read per request so settings changes apply. */
   config: () => OpenDesignConfig
-  /** Resolve the API key of the selected credential reference. */
-  resolveApiKey: () => Promise<string | undefined>
+  /**
+   * Resolve one account's API key by credential reference.
+   * @param ref - reference of the account to resolve.
+   * @returns the usable key, or undefined when that account has none stored.
+   */
+  resolveApiKey: (ref: string) => Promise<string | undefined>
+  /**
+   * Pin one account as the one subsequent requests should use.
+   *
+   * Called only after an account has actually produced output, so a failing
+   * account is never promoted just by being tried.
+   * @param ref - the account that succeeded.
+   */
+  onAccountSettled?: (ref: string) => void
 }
 
 /** One text or reasoning block accumulated while streaming. */
@@ -153,33 +169,66 @@ export class OpenDesignAdapter extends LlmAdapter {
    */
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const config = this.#options.config()
-    const apiKey = await this.#apiKey(config)
-    const response = await dispatch(options, config, apiKey)
-
-    if (!response.ok) throw classifyGatewayFailure(await readFailure(response))
-
-    const body = response.body
-    if (body === null) throw emptyResponseFailure()
-    yield* consumeSse(body)
+    // Account fallback is decided once, from the same configuration snapshot
+    // every attempt shares: the selected account first, then the rest of the
+    // list in order when auto-switch is on. Nothing re-reads the list mid-call,
+    // so a settings edit cannot change the roster between attempts.
+    const candidates = config.autoSwitch ? accountsOf(config).map((account) => account.apiKeyEnv) : [config.apiKeyEnv]
+    let lastFailure: unknown
+    for (const ref of candidates) {
+      const apiKey = await this.#apiKey(ref)
+      const response = await dispatch(options, config, apiKey)
+      if (!response.ok) {
+        lastFailure = classifyGatewayFailure(await readFailure(response))
+        // Only a rejected credential or exhausted quota justifies trying the
+        // next subscription; a timeout or a malformed request would fail
+        // identically everywhere.
+        if (config.autoSwitch && isRetryableAccountFailure(lastFailure)
+          && candidates.indexOf(ref) < candidates.length - 1) continue
+        throw lastFailure
+      }
+      const body = response.body
+      if (body === null) throw emptyResponseFailure()
+      for await (const chunk of consumeSse(body)) {
+        // Promote the account only once it has produced real output: an account
+        // that fails after streaming began must not become the new default.
+        if (chunk.type === 'block-end') this.#options.onAccountSettled?.(ref)
+        yield chunk
+      }
+      return
+    }
+    throw lastFailure ?? new LlmError('OpenDesign: no usable account', MISSING_CREDENTIAL)
   }
 
   /**
-   * Resolve and validate the API key for one request.
-   * @param config - configuration snapshot naming the credential reference.
+   * Resolve and validate one account's API key.
+   * @param ref - credential reference of the account.
    * @returns the trimmed, usable key.
    * @throws LlmError - `MISSING_CREDENTIAL` when nothing resolved, or the
    * harness's `INVALID_CREDENTIAL` when the value cannot be a header value.
    */
-  async #apiKey(config: OpenDesignConfig): Promise<string> {
-    const raw = await this.#options.resolveApiKey()
+  async #apiKey(ref: string): Promise<string> {
+    const raw = await this.#options.resolveApiKey(ref)
     if (raw === undefined) {
       throw new LlmError(
-        `OpenDesign: no API key resolved for ${config.apiKeyEnv}; set it in the Models settings or the launching environment`,
+        `OpenDesign: no API key resolved for ${ref}; set it in the Models settings or the launching environment`,
         MISSING_CREDENTIAL,
       )
     }
-    return assertUsableApiKey(raw, PACKAGE_NAME, config.apiKeyEnv)
+    return assertUsableApiKey(raw, PACKAGE_NAME, ref)
   }
+}
+
+/**
+ * Whether a failure justifies trying the next account.
+ * @param failure - classified failure from one attempt.
+ * @returns true only for a rejected credential or exhausted quota.
+ */
+export function isRetryableAccountFailure(failure: unknown): boolean {
+  if (!(failure instanceof LlmError)) return false
+  return failure.code === INVALID_CREDENTIAL
+    || failure.code === QUOTA_EXCEEDED_CODE
+    || failure.code === ACCOUNT_QUOTA_EXCEEDED_CODE
 }
 
 /**

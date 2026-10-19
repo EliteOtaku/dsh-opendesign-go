@@ -21,8 +21,20 @@ import { type OpenDesignConfig } from './config-contract.ts';
 export interface OpenDesignAdapterOptions {
     /** Current plugin configuration; read per request so settings changes apply. */
     config: () => OpenDesignConfig;
-    /** Resolve the API key of the selected credential reference. */
-    resolveApiKey: () => Promise<string | undefined>;
+    /**
+     * Resolve one account's API key by credential reference.
+     * @param ref - reference of the account to resolve.
+     * @returns the usable key, or undefined when that account has none stored.
+     */
+    resolveApiKey: (ref: string) => Promise<string | undefined>;
+    /**
+     * Pin one account as the one subsequent requests should use.
+     *
+     * Called only after an account has actually produced output, so a failing
+     * account is never promoted just by being tried.
+     * @param ref - the account that succeeded.
+     */
+    onAccountSettled?: (ref: string) => void;
 }
 /**
  * Stream one model call.
@@ -69,3 +81,9 @@ export declare class OpenDesignAdapter extends LlmAdapter {
      */
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
 }
+/**
+ * Whether a failure justifies trying the next account.
+ * @param failure - classified failure from one attempt.
+ * @returns true only for a rejected credential or exhausted quota.
+ */
+export declare function isRetryableAccountFailure(failure: unknown): boolean;
