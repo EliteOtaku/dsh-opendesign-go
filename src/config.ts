@@ -35,6 +35,8 @@ const AccountSchema = z.object({
   name: z.string().required(),
   /** Credential reference resolving this account's API key. */
   apiKeyEnv: z.string().required().role('credential-ref'),
+  /** Console workspace id; needed only to read this account's quota. */
+  workspaceId: z.string(),
 })
 
 /**
@@ -63,6 +65,8 @@ export const PlainConfig: z<OpenDesignConfig> = z.object({
   apiKeyEnv: z.string().default(DEFAULT_API_KEY_ENV),
   accounts: AccountsSchema,
   autoSwitch: z.boolean().default(false),
+  sessionRef: z.string().default(''),
+  workspaceId: z.string().default(''),
   baseURL: z.string().default(DEFAULT_BASE_URL),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -86,6 +90,8 @@ export const Config = z.object({
   apiKeyEnv: z.string().default(DEFAULT_API_KEY_ENV).volatile(),
   accounts: AccountsSchema.volatile(),
   autoSwitch: z.boolean().default(false).volatile(),
+  sessionRef: z.string().default('').volatile(),
+  workspaceId: z.string().default('').volatile(),
   baseURL: z.string().default(DEFAULT_BASE_URL).volatile(),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS).volatile(),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS).volatile(),
@@ -104,9 +110,13 @@ export interface LiveConfig {
   /** Credential reference of the selected account. */
   readonly apiKeyEnv: { get(): string }
   /** Accounts, or `null` for "only {@link apiKeyEnv}". */
-  readonly accounts: { get(): readonly OpenDesignAccount[] | null }
+  readonly accounts: { get(): readonly OpenDesignAccount[] }
   /** Try the next account after a credential rejection. */
   readonly autoSwitch: { get(): boolean }
+  /** Credential reference of the console session; empty when the channel is off. */
+  readonly sessionRef: { get(): string }
+  /** Console workspace id used when the selected account declares none. */
+  readonly workspaceId: { get(): string }
   /** Inference base URL, stored as configured. */
   readonly baseURL: { get(): string }
   /** Deadline for one dispatch. */
@@ -126,6 +136,8 @@ export function readConfig(config: LiveConfig): OpenDesignConfig {
     apiKeyEnv: config.apiKeyEnv.get(),
     accounts: accountsOfConfig(config.accounts.get()),
     autoSwitch: config.autoSwitch.get(),
+    sessionRef: config.sessionRef.get(),
+    workspaceId: config.workspaceId.get(),
     baseURL: migrateGatewayBaseURL(config.baseURL.get()),
     requestTimeoutMs: config.requestTimeoutMs.get(),
     streamIdleTimeoutMs: config.streamIdleTimeoutMs.get(),

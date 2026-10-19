@@ -57,11 +57,19 @@ export interface LiveConfig {
     };
     /** Accounts, or `null` for "only {@link apiKeyEnv}". */
     readonly accounts: {
-        get(): readonly OpenDesignAccount[] | null;
+        get(): readonly OpenDesignAccount[];
     };
     /** Try the next account after a credential rejection. */
     readonly autoSwitch: {
         get(): boolean;
+    };
+    /** Credential reference of the console session; empty when the channel is off. */
+    readonly sessionRef: {
+        get(): string;
+    };
+    /** Console workspace id used when the selected account declares none. */
+    readonly workspaceId: {
+        get(): string;
     };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {

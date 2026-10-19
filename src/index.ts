@@ -25,6 +25,8 @@ import { DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract
 import type { OpenDesignConfig } from './config-contract.ts'
 import { listSeedModels } from './catalog.ts'
 import { installHostSettings } from './host-settings.ts'
+import { OpenDesignUsageService, sessionResolverOf } from './usage.ts'
+import { DEFAULT_SESSION_REF } from './config-contract.ts'
 
 /** Plugin module name; stable, and declared in dsh-plugin.naming.json. */
 export const name = 'llm-opendesign-go'
@@ -39,6 +41,9 @@ export { OpenDesignAdapter } from './adapter.ts'
 export { DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL, DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract.ts'
 export type { OpenDesignAccount, OpenDesignConfig } from './config-contract.ts'
 export { GO_DESIGN_PLAN_MODELS, listSeedModels } from './catalog.ts'
+export { OpenDesignUsageService, CONSOLE_BASE_URL } from './usage.ts'
+export { percentUsedOf, windowLabel } from './usage-contract.ts'
+export type { QuotaWindow, UsageSnapshot, WalletSnapshot } from './usage-contract.ts'
 export { Config, PlainConfig, assertApiKeyEnv, assertBaseURL, readConfig } from './config.ts'
 
 /**
@@ -59,6 +64,25 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   assertApiKeyEnv(initial.apiKeyEnv)
   ctx.logger.info('llm-opendesign-go: mounted')
   installHostSettings(ctx)
+
+  // The quota channel is off until the user stores a console session reference:
+  // it reads account state far beyond inference, so it is opt-in by design.
+  const usage = new OpenDesignUsageService({
+    resolveSession: async () => {
+      const ref = current().sessionRef
+      if (ref.length === 0) return undefined
+      const resolve = sessionResolverOf(ctx)
+      return await resolve()
+    },
+    workspaceOf: (accountRef) => {
+      const config = current()
+      const account = config.accounts?.find((row) => row.apiKeyEnv === accountRef)
+      const workspace = account?.workspaceId ?? (accountRef === config.apiKeyEnv ? config.workspaceId : undefined)
+      return workspace !== undefined && workspace.length > 0 ? workspace : undefined
+    },
+    activeRef: () => current().apiKeyEnv,
+  })
+  ctx.set('openDesignGoUsage', usage)
 
   /**
    * Resolve the selected account's key through the credentials seam, falling

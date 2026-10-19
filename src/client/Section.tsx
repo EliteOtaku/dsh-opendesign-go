@@ -12,17 +12,24 @@
  *
  * @module dsh-opendesign-go/client/Section
  */
-import { useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
 import { PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
+import type { UsageSnapshot } from '../usage-contract.ts'
+import { QuotaCard } from './QuotaCard.tsx'
 
 /** Props injected into the section by the registering plugin. */
 export interface OpenDesignSectionInjected {
   /** Live config form bound to this plugin's profile entry. */
   readonly form: ConfigForm<OpenDesignConfig>
+  /**
+   * Reads the quota channel. Absent on a host that does not mount the remote,
+   * in which case the page shows that quota is unavailable rather than failing.
+   */
+  readonly readUsage?: () => Promise<UsageSnapshot>
 }
 
 const pageStyle = {
@@ -69,12 +76,25 @@ const buttonStyle = {
   cursor: 'pointer',
 } as const
 
+const inputStyle = {
+  display: 'block',
+  width: '100%',
+  marginTop: '4px',
+  padding: '6px 8px',
+  fontSize: '12px',
+  borderRadius: '6px',
+  border: '1px solid rgba(128, 128, 128, 0.3)',
+  background: 'transparent',
+  color: 'inherit',
+  boxSizing: 'border-box',
+} as const
+
 /**
  * Render the settings page.
- * @param props - injected config form.
+ * @param props - injected config form and optional quota reader.
  * @returns the page body.
  */
-export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactElement {
+export function OpenDesignSection({ form, readUsage }: OpenDesignSectionInjected): ReactElement {
   const snapshot = useSyncExternalStore(
     (listener) => form.subscribe(listener),
     () => form.getSnapshot(),
@@ -82,6 +102,34 @@ export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactEle
   const value = snapshot.value
   const enabled = value?.enabled ?? true
   const editable = snapshot.status === 'ready' && snapshot.writable
+  const [usage, setUsage] = useState<UsageSnapshot | undefined>(undefined)
+  const [usageLoading, setUsageLoading] = useState(false)
+  const sessionRef = value?.sessionRef ?? ''
+
+  /** Read the quota channel once and keep the result, including its failure state. */
+  const loadUsage = (): void => {
+    if (readUsage === undefined) return
+    setUsageLoading(true)
+    void readUsage()
+      .then((next) => { setUsage(next) })
+      .catch((error: unknown) => {
+        setUsage({
+          asOf: new Date().toISOString(),
+          tier: '',
+          eligible: false,
+          windows: [],
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+      .finally(() => { setUsageLoading(false) })
+  }
+
+  // Read once the console session reference exists: reading without it would
+  // only produce a "not configured" snapshot.
+  useEffect(() => {
+    if (sessionRef.length > 0 && readUsage !== undefined) loadUsage()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read once per session ref change
+  }, [sessionRef])
 
   /**
    * Flip the route switch. A refusal is surfaced instead of swallowed: the
@@ -142,6 +190,44 @@ export function OpenDesignSection({ form }: OpenDesignSectionInjected): ReactEle
             onChange={(event) => { toggle(event.target.checked) }}
             aria-label="启用 OpenDesign Go"
           />
+        </div>
+      </div>
+
+      <QuotaCard snapshot={usage} loading={usageLoading} />
+
+      <div style={cardStyle}>
+        <div style={{ fontSize: '14px', fontWeight: 500 }}>额度通道</div>
+        <p style={{ ...hintStyle, marginTop: '4px' }}>
+          额度接口不用 API Key 鉴权，需要一份控制台会话凭据。留空表示关闭该通道（默认关闭）。
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
+          <label style={{ fontSize: '12px', opacity: 0.7 }}>
+            会话凭据引用名
+            <input
+              type="text"
+              defaultValue={sessionRef}
+              disabled={!editable}
+              placeholder="OPENDESIGN_SESSION"
+              onBlur={(event) => { void form.set('sessionRef', event.target.value.trim()) }}
+              style={inputStyle}
+            />
+          </label>
+          <label style={{ fontSize: '12px', opacity: 0.7 }}>
+            工作空间 ID
+            <input
+              type="text"
+              defaultValue={value?.workspaceId ?? ''}
+              disabled={!editable}
+              placeholder="workspaceId（控制台 URL 里的 t…）"
+              onBlur={(event) => { void form.set('workspaceId', event.target.value.trim()) }}
+              style={inputStyle}
+            />
+          </label>
+          <div>
+            <button type="button" onClick={loadUsage} disabled={!editable || usageLoading} style={buttonStyle}>
+              {usageLoading ? '读取中…' : '刷新额度'}
+            </button>
+          </div>
         </div>
       </div>
 

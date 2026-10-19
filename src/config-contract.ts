@@ -30,6 +30,13 @@ export const DEFAULT_BASE_URL = 'https://amr-link.open-design.ai/v1'
 /** Environment variable resolving the OpenDesign API key by default. */
 export const DEFAULT_API_KEY_ENV = 'OPENDESIGN_API_KEY'
 
+/**
+ * Credential reference holding the **console session token**, used only to read
+ * quota. It is deliberately separate from the API key: the key bills inference,
+ * the session reads the console, and a user may configure one without the other.
+ */
+export const DEFAULT_SESSION_REF = 'OPENDESIGN_SESSION'
+
 /** One OpenDesign account: a distinct subscription, not a second key. */
 export interface OpenDesignAccount {
   /** Stable local id; never sent upstream. */
@@ -38,6 +45,11 @@ export interface OpenDesignAccount {
   readonly name: string
   /** Credential reference resolving this account's API key. */
   readonly apiKeyEnv: string
+  /**
+   * Console workspace id, needed only to read quota for this account. Omitted
+   * means "inference works, quota display is unavailable" — never guessed.
+   */
+  readonly workspaceId?: string
 }
 
 /**
@@ -53,6 +65,14 @@ export interface OpenDesignConfig {
   readonly accounts: readonly OpenDesignAccount[] | null
   /** Try the next account after a credential rejection. */
   readonly autoSwitch: boolean
+  /**
+   * Credential reference holding the console session token. Empty string means
+   * the quota channel is off, which is the default: reading the console grants
+   * account access far beyond inference.
+   */
+  readonly sessionRef: string
+  /** Console workspace id used when the selected account declares none. */
+  readonly workspaceId: string
   /** Inference base URL without a trailing slash. */
   readonly baseURL: string
   /** Deadline for one dispatch, spanning discovery through streaming. */

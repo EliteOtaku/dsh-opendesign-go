@@ -27,6 +27,9 @@ export { OpenDesignAdapter } from './adapter.ts';
 export { DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL, DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract.ts';
 export type { OpenDesignAccount, OpenDesignConfig } from './config-contract.ts';
 export { GO_DESIGN_PLAN_MODELS, listSeedModels } from './catalog.ts';
+export { OpenDesignUsageService, CONSOLE_BASE_URL } from './usage.ts';
+export { percentUsedOf, windowLabel } from './usage-contract.ts';
+export type { QuotaWindow, UsageSnapshot, WalletSnapshot } from './usage-contract.ts';
 export { Config, PlainConfig, assertApiKeyEnv, assertBaseURL, readConfig } from './config.ts';
 /**
  * Mount the plugin for one composition entry.
