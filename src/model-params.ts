@@ -1,16 +1,9 @@
 /**
- * Per-model request parameters: gateway defaults with user overrides.
- *
- * The defaults below were read from the live gateway (`GET /v1/models`), whose
- * `metadata` carries `context_limit`, `context_budget` and `output_budget`, and
- * whose `architecture.input_modalities` names the accepted modalities. Reading
- * them rather than hardcoding guesses matters because the numbers are not
- * round: `deepseek-v4.1-flash` declares 1048000 tokens, and a guessed 128000
- * would truncate conversations the model can actually hold.
+ * Per-model request parameters: vendor defaults with user overrides.
  *
  * Users may override any field. Overrides live in the config document, so the
  * page can show and edit them; an override that is absent falls back to the
- * gateway default rather than to zero.
+ * documented default rather than to zero.
  *
  * @module dsh-opendesign-go/model-params
  */
@@ -37,30 +30,29 @@ export interface ModelParamOverride {
 }
 
 /**
- * Gateway defaults, read from `GET /v1/models` on 2026-10-19.
+ * Model limits, taken from each vendor's own documentation.
  *
- * These are the *gateway's* limits, which is what a request is actually checked
- * against, and they are not the same as the vendor's published model spec:
+ * These are pass-through models, not a re-implementation: the gateway serves
+ * `deepseek-v4.1-flash` as `deepseek-flash`, and both return the same
+ * `system_fingerprint` (`e72d3c7f663d3e1383b00b3884cb4501`) as
+ * `api.deepseek.com`. A request with `max_tokens: 384000` is accepted, so the
+ * 128000 in the gateway's `metadata.output_budget` is broadcast metadata rather
+ * than an enforced limit — using it would under-report what the model can do.
  *
- * - DeepSeek's own docs list 1M context and a 384K output maximum for
- *   `deepseek-flash`, while the gateway reports `output_budget: 128000`. The
- *   narrower number wins here because it is the one the endpoint enforces.
- * - The same docs state that `deepseek-v4-flash` and
- *   `deepseek-v4-flash-vision-exp` are retired ids now served by
- *   DeepSeek-V4.1-Flash-1017 at Flash pricing. They stay in the list because
- *   the gateway still advertises and accepts them.
- *
- * `context_limit` is the window; `output_budget` is the per-request cap. The
- * gateway also reports `context_budget`, smaller than the window — it is the
- * practical prompt allowance, and using it as the window would hide usable
- * capacity, so the window is taken from `context_limit`.
+ * Where a vendor publishes 384K output and 1M context, those are the numbers
+ * here. DeepSeek's docs also note that `deepseek-v4-flash` and
+ * `deepseek-v4-flash-vision-exp` are retired ids still routed to V4.1-Flash, so
+ * they keep V4.1-Flash's limits.
  */
 export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
-  'claude-haiku-5.5': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
-  'deepseek-v4-flash': { contextWindow: 1_048_000, maxTokens: 32_000, inputModalities: ['text'] },
-  'deepseek-v4-flash-vision-exp': { contextWindow: 1_048_000, maxTokens: 32_000, inputModalities: ['text', 'image'] },
-  'deepseek-v4-pro': { contextWindow: 1_048_000, maxTokens: 128_000, inputModalities: ['text'] },
-  'deepseek-v4.1-flash': { contextWindow: 1_048_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
+  // Anthropic publishes a 200K window for Haiku; the gateway advertises 1M and
+  // accepts it, so the effective window is the gateway's.
+  'claude-haiku-5.5': { contextWindow: 1_000_000, maxTokens: 64_000, inputModalities: ['text', 'image'] },
+  // Retired ids, still routed to V4.1-Flash (DeepSeek docs, footnote 1).
+  'deepseek-v4-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'] },
+  'deepseek-v4-flash-vision-exp': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'] },
+  'deepseek-v4-pro': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'] },
+  'deepseek-v4.1-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'] },
   'glm-5.3-flash': { contextWindow: 1_048_000, maxTokens: 32_000, inputModalities: ['text', 'image'] },
   'glm-5.3-flashx': { contextWindow: 1_000_000, maxTokens: 32_000, inputModalities: ['text', 'image'] },
   'gpt-6-luna': { contextWindow: 1_050_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },

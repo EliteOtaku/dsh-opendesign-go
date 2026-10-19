@@ -20,12 +20,21 @@ describe('gateway model defaults', () => {
     expect(Object.keys(MODEL_DEFAULTS)).toHaveLength(12)
   })
 
-  it('keeps the non-round windows the gateway actually reports', () => {
-    // 1048000 is what /v1/models says; rounding it to 128000 would truncate
-    // conversations the model can hold.
-    expect(MODEL_DEFAULTS['deepseek-v4.1-flash']?.contextWindow).toBe(1_048_000)
-    expect(MODEL_DEFAULTS['kimi-k2.7-code']?.contextWindow).toBe(262_000)
-    expect(MODEL_DEFAULTS['gpt-6-luna']?.maxTokens).toBe(128_000)
+  it('uses the vendor-published DeepSeek limits, not the gateway metadata', () => {
+    // DeepSeek documents 1M context and a 384K output maximum. The gateway's
+    // metadata.output_budget says 128000, but a request asking for 384000 is
+    // accepted, so that field is broadcast metadata rather than a limit — and
+    // both endpoints return the same system_fingerprint, so this is the same
+    // model behind a pass-through.
+    expect(MODEL_DEFAULTS['deepseek-v4.1-flash']?.contextWindow).toBe(1_000_000)
+    expect(MODEL_DEFAULTS['deepseek-v4.1-flash']?.maxTokens).toBe(384_000)
+    expect(MODEL_DEFAULTS['deepseek-v4-pro']?.maxTokens).toBe(384_000)
+  })
+
+  it('gives the retired DeepSeek ids the limits of the model that serves them', () => {
+    // The docs state both ids now route to DeepSeek-V4.1-Flash-1017.
+    expect(MODEL_DEFAULTS['deepseek-v4-flash']?.maxTokens).toBe(384_000)
+    expect(MODEL_DEFAULTS['deepseek-v4-flash-vision-exp']?.maxTokens).toBe(384_000)
   })
 
   it('declares image input only where the gateway reports it', () => {
@@ -60,8 +69,8 @@ describe('parseModelParams', () => {
 
 describe('paramsOf', () => {
   it('returns the default when nothing is overridden', () => {
-    expect(paramsOf('deepseek-v4.1-flash', {})?.maxTokens).toBe(128_000)
-    expect(paramsOf('deepseek-v4.1-flash', undefined)?.maxTokens).toBe(128_000)
+    expect(paramsOf('deepseek-v4.1-flash', {})?.maxTokens).toBe(384_000)
+    expect(paramsOf('deepseek-v4.1-flash', undefined)?.maxTokens).toBe(384_000)
   })
 
   it('applies an override in range', () => {
@@ -70,12 +79,12 @@ describe('paramsOf', () => {
 
   it('ignores an out-of-range override instead of clamping it', () => {
     // Clamping would make the page claim a value the user never entered.
-    expect(paramsOf('deepseek-v4.1-flash', { 'deepseek-v4.1-flash': { maxTokens: 0 } })?.maxTokens).toBe(128_000)
-    expect(paramsOf('deepseek-v4.1-flash', { 'deepseek-v4.1-flash': { contextWindow: MAX_CONTEXT_WINDOW + 1 } })?.contextWindow).toBe(1_048_000)
+    expect(paramsOf('deepseek-v4.1-flash', { 'deepseek-v4.1-flash': { maxTokens: 0 } })?.maxTokens).toBe(384_000)
+    expect(paramsOf('deepseek-v4.1-flash', { 'deepseek-v4.1-flash': { contextWindow: MAX_CONTEXT_WINDOW + 1 } })?.contextWindow).toBe(1_000_000)
   })
 
   it('keeps the default for a non-finite override', () => {
-    expect(paramsOf('deepseek-v4.1-flash', { 'deepseek-v4.1-flash': { maxTokens: Number.NaN } })?.maxTokens).toBe(128_000)
+    expect(paramsOf('deepseek-v4.1-flash', { 'deepseek-v4.1-flash': { maxTokens: Number.NaN } })?.maxTokens).toBe(384_000)
   })
 
   it('returns undefined for an unknown model rather than inventing a window', () => {
