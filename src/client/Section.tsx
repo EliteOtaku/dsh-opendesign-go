@@ -106,6 +106,7 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   const enabled = value?.enabled ?? true
   const editable = snapshot.status === 'ready' && snapshot.writable
   const sessionRef = value?.sessionRef ?? ''
+  const useVela = value?.useVelaCredential ?? false
   // The host publishes each quota reading into the config document, which this
   // page already receives; parsing it here needs no second transport and keeps
   // one source of truth.
@@ -199,9 +200,36 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
       <QuotaCard snapshot={usage} loading={usageLoading} />
 
       <div style={cardStyle}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>额度通道</div>
+        <div style={{ fontSize: '14px', fontWeight: 500 }}>额度来源</div>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginTop: '8px', cursor: editable ? 'pointer' : 'default' }}>
+          <input
+            type="checkbox"
+            checked={useVela}
+            disabled={!editable}
+            onChange={(event) => { void form.set('useVelaCredential', event.target.checked) }}
+            style={{ marginTop: '2px' }}
+          />
+          <span style={{ fontSize: '13px' }}>
+            使用本机 OpenDesign 的登录凭证读取额度
+            <span style={{ display: 'block', fontSize: '12px', opacity: 0.62, marginTop: '2px', lineHeight: 1.5 }}>
+              如果你安装并登录过 OpenDesign 桌面端，勾选后即可直接读取真实的 5 小时 / 7 天额度，
+              无需再填任何凭据。只想用 API Key 的话保持关闭即可。
+            </span>
+          </span>
+        </label>
+        {useVela && (
+          <p style={{ ...hintStyle, marginTop: '8px', fontSize: '12px' }}>
+            读取方式：调用 OpenDesign 桌面端自带的 vela 命令行。该命令属官方私有接口，
+            若 OpenDesign 升级后格式变化，这里会显示失败原因而不是给出错误数字。
+          </p>
+        )}
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ fontSize: '14px', fontWeight: 500 }}>额度通道（控制台会话，可选）</div>
         <p style={{ ...hintStyle, marginTop: '4px' }}>
-          额度接口不用 API Key 鉴权，需要一份控制台会话凭据。留空表示关闭该通道（默认关闭）。
+          另一种读取方式：用控制台会话凭据直接请求额度接口。与上面的 vela 方式二选一，
+          两种都关闭时只显示本地用量估算。
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
           <label style={{ fontSize: '12px', opacity: 0.7 }}>

@@ -82,6 +82,14 @@ export interface OpenDesignConfig {
      * has been served.
      */
     readonly reportJson: string;
+    /**
+     * Read quota through the OpenDesign desktop app's own `vela` CLI.
+     *
+     * Off by default: a user who only wants an API key never installs the app,
+     * and this plugin must work without it. When on, the app's existing login is
+     * reused, so no credential is typed or stored here.
+     */
+    readonly useVelaCredential: boolean;
     /** Inference base URL without a trailing slash. */
     readonly baseURL: string;
     /** Deadline for one dispatch, spanning discovery through streaming. */

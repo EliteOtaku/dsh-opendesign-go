@@ -33,10 +33,31 @@ export type ChannelState = () => string
 /** Remote namespaces this page needs before any command can run. */
 const REQUIRED_REMOTES = ['remote.credentials', 'remote.settings']
 
+/**
+ * Every Remote call resolves to this envelope, never to a bare value.
+ *
+ * Reading a field straight off the call result is what made the settings read
+ * fail with "cannot read properties of undefined": the value sits one level
+ * down, under `value`, and a failed call never throws — it answers `ok: false`.
+ */
+type RemoteResult<T> = { readonly ok: true, readonly value: T } | { readonly ok: false, readonly error: unknown }
+
+/**
+ * Unwrap one Remote result.
+ * @param result - the envelope the Host answered with.
+ * @returns the value.
+ * @throws {Error} when the Host reported a failure.
+ */
+function unwrap<T>(result: RemoteResult<T>): T {
+  if (result.ok) return result.value
+  const detail = result.error instanceof Error ? result.error.message : String(result.error)
+  throw new Error(detail)
+}
+
 /** The subset of the credentials namespace this page uses. */
 interface CredentialsRemote {
-  set(ref: string, value: string): Promise<unknown>
-  unset(ref: string): Promise<unknown>
+  set(ref: string, value: string): Promise<RemoteResult<unknown>>
+  unset(ref: string): Promise<RemoteResult<unknown>>
 }
 
 /** One stored account row, as the config document holds it. */
@@ -63,16 +84,15 @@ interface DescribeResult {
 
 /** The subset of the settings namespace this page uses. */
 interface SettingsRemote {
-  update(ns: string, patch: object, expectedRevision?: number): Promise<unknown>
+  update(ns: string, patch: object, expectedRevision?: number): Promise<RemoteResult<unknown>>
   /**
    * Every namespace, in one call.
    *
    * There is no per-namespace read: the Host publishes `describe` and `update`,
-   * and nothing else. Two details here were both wrong at first and both made
-   * every command fail while the channel reported itself ready — there is no
-   * `get`, and `describe` answers an object carrying `namespaces`, not an array.
+   * and nothing else. The payload carries `namespaces`, under the Remote
+   * envelope.
    */
-  describe(): Promise<DescribeResult>
+  describe(): Promise<RemoteResult<DescribeResult>>
 }
 
 /**
@@ -111,7 +131,7 @@ export function accountCommands(ctx: ClientContext): {
    */
   const readEntry = async (): Promise<NamespaceRow | undefined> => {
     if (settings === undefined) return undefined
-    const described = await settings.describe()
+    const described = unwrap(await settings.describe())
     return described.namespaces.find((row) => row.ns === PROFILE_ENTRY_ID)
   }
 
@@ -125,7 +145,7 @@ export function accountCommands(ctx: ClientContext): {
     try {
       const current = await readEntry()
       if (current === undefined) return 'rejected'
-      await settings.update(PROFILE_ENTRY_ID, patch, current.revision)
+      unwrap(await settings.update(PROFILE_ENTRY_ID, patch, current.revision))
       return 'applied'
     } catch (error) {
       ctx.logger.warn?.(`llm-opendesign-go: settings write failed (${String(error)})`)
@@ -163,7 +183,7 @@ export function accountCommands(ctx: ClientContext): {
         const ref = `OPENDESIGN_ACCOUNT_${index + 1}`
         // Credential first: a stored key without a row is recoverable, the
         // reverse is a config naming a key nobody stored.
-        await credentials.set(ref, command.key)
+        unwrap(await credentials.set(ref, command.key))
         const account: AccountRow = {
           id: command.id,
           name: command.name,
@@ -185,7 +205,7 @@ export function accountCommands(ctx: ClientContext): {
         const result = await writeEntry({ accounts: next, apiKeyEnv: first.apiKeyEnv })
         if (result === 'applied') {
           try {
-            await credentials.unset(command.ref)
+            unwrap(await credentials.unset(command.ref))
           } catch {
             // The row is already gone; an orphan key is harmless because the
             // next add reuses the reference.
@@ -209,7 +229,7 @@ export function accountCommands(ctx: ClientContext): {
       }
 
       if (command.kind === 'replace-key') {
-        await credentials.set(command.ref, command.key)
+        unwrap(await credentials.set(command.ref, command.key))
         return 'applied'
       }
 

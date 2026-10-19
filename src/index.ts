@@ -28,8 +28,11 @@ import { accountsOf, assertAccounts } from './accounts.ts'
 import { LedgerStore } from './ledger-store.ts'
 import { costOf, summarize } from './usage-ledger.ts'
 import { priceOf } from './pricing.ts'
+import { locateVela } from './vela-locate.ts'
+import { readVelaUsage } from './vela-billing.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
+import type { UsageSnapshot } from './usage-contract.ts'
 
 /** Local usage report window: the trailing 30 days. */
 const REPORT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
@@ -105,35 +108,63 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * Read the quota channel and publish the result into the config document,
    * which is the channel the page already receives.
    *
+   * Two sources, chosen by configuration. The `vela` path reuses the OpenDesign
+   * app's own login and needs nothing from the user; the console-session path is
+   * the older one and stays available for anyone who prefers it.
+   *
    * A failure is published too: the page can then say why it has no numbers
    * instead of showing a stale reading with no explanation.
    */
   const refreshUsage = async (): Promise<void> => {
     const write = fieldWriterOf(ctx)
     if (write === undefined) return
-    const snapshot = await usage.read()
+    const config = current()
+    let snapshot: UsageSnapshot
+    if (config.useVelaCredential) {
+      const vela = locateVela()
+      if (vela === undefined) {
+        snapshot = {
+          asOf: new Date().toISOString(),
+          tier: '',
+          eligible: false,
+          windows: [],
+          error: '未找到 OpenDesign 桌面端的 vela 命令行；安装并登录 OpenDesign 后即可自动读取',
+        }
+      } else {
+        snapshot = await readVelaUsage(vela.path, config.workspaceId)
+      }
+    } else {
+      snapshot = await usage.read()
+    }
     await write('usageJson', JSON.stringify(snapshot))
     ctx.logger.info(`llm-opendesign-go: quota ${usage.describe(snapshot)}`)
   }
 
-  /** Refresh on start and whenever the session or workspace changes. */
-  const refreshIfConfigured = (): void => {
+  /** Whether this configuration asks for a quota read at all. */
+  const wantsUsage = (): boolean => {
     const config = current()
-    if (config.sessionRef.length === 0) return
-    if (config.workspaceId.length === 0 && !config.accounts?.some((row) => row.workspaceId)) return
+    if (config.useVelaCredential) return true
+    if (config.sessionRef.length === 0) return false
+    return config.workspaceId.length > 0 || config.accounts?.some((row) => row.workspaceId) === true
+  }
+
+  /** Refresh on start and whenever the quota settings change. */
+  const refreshIfConfigured = (): void => {
+    if (!wantsUsage()) return
     void refreshUsage().catch((error: unknown) => {
       ctx.logger.warn(`llm-opendesign-go: quota refresh failed (${String(error)})`)
     })
   }
   refreshIfConfigured()
-  let lastUsageKey = `${current().sessionRef}|${current().workspaceId}`
+  let lastUsageKey = `${current().useVelaCredential}|${current().sessionRef}|${current().workspaceId}`
   ctx.effect(() => {
     // The config document has no change event on this host, so the same values
-    // are compared on a short timer. The interval is deliberately coarse: the
-    // console calls cost real requests and a quota bar does not need seconds.
+    // are compared on a short timer. The interval is deliberately coarse: each
+    // read costs a subprocess (or a network call) and a quota bar does not need
+    // seconds.
     const timer = setInterval(() => {
       const config = current()
-      const key = `${config.sessionRef}|${config.workspaceId}`
+      const key = `${config.useVelaCredential}|${config.sessionRef}|${config.workspaceId}`
       if (key === lastUsageKey) return
       lastUsageKey = key
       refreshIfConfigured()

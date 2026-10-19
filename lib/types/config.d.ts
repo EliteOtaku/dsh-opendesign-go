@@ -79,6 +79,10 @@ export interface LiveConfig {
     readonly reportJson: {
         get(): string;
     };
+    /** Whether quota is read through the OpenDesign app's own login. */
+    readonly useVelaCredential: {
+        get(): boolean;
+    };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {
         get(): string;
