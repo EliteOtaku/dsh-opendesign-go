@@ -170,8 +170,11 @@ export function OpenDesignSection({ form, readUsage }: OpenDesignSectionInjected
         </div>
       )}
       {snapshot.status === 'unavailable' && (
-        <div style={{ ...hintStyle, display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ ...hintStyle, display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <span>宿主未暴露本插件的配置项（namespace: {PROFILE_ENTRY_ID}）。</span>
+          <span style={{ fontSize: '11px', opacity: 0.7 }}>
+            诊断：{snapshot.status} / revision={String(snapshot.revision)} / writable={String(snapshot.writable)}
+          </span>
           <button type="button" onClick={retry} style={buttonStyle}>重新加载</button>
         </div>
       )}
