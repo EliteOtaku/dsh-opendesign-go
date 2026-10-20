@@ -11,7 +11,7 @@
 import type { ReactElement } from 'react'
 import { creditsToNumber } from '../usage-contract.ts'
 import type { QuotaWindow, UsageSnapshot } from '../usage-contract.ts'
-import { barColor, resetCountdown, windowLabel } from './usage-format.ts'
+import { barColor, daysToExhaust, resetCountdown, windowLabel } from './usage-format.ts'
 
 // Re-exported so the format helpers stay reachable from the card that first
 // published them; existing importers must not need a path change for a move.
@@ -36,6 +36,7 @@ function WindowRow({ window, creditsPerUsd }: {
     if (used === null) return undefined
     return `$${(used / creditsPerUsd).toFixed(2)}`
   }
+  const exhaust = daysToExhaust(window)
   const usedUsd = dollars(window.usedCredits)
   const limitUsd = dollars(window.limitCredits)
   // Remaining money, to match the percentage and the bar above it.
@@ -82,6 +83,11 @@ function WindowRow({ window, creditsPerUsd }: {
         <div style={{ fontSize: '11px', opacity: 0.55, fontVariantNumeric: 'tabular-nums' }}>
           剩余 {remainingUsd} / {limitUsd}
           {usedUsd !== undefined && <span style={{ opacity: 0.75 }}>{`（已用 ${usedUsd}）`}</span>}
+          {exhaust !== undefined && (
+            <span style={{ opacity: 0.85 }}>
+              {` · 照此速率约 ${exhaust < 1 ? '不足 1' : exhaust.toFixed(1)} 天用完`}
+            </span>
+          )}
         </div>
       )}
     </div>

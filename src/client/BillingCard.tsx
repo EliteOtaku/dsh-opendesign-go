@@ -120,6 +120,17 @@ export function BillingCard({ snapshot, plan, measuredUsd, baseline, onAlign, ed
   // Only the widest window is priced: summing windows would charge the same
   // tokens twice, since the short window's usage is contained in the long one.
   const monthlySpent = monthly === undefined ? undefined : spentFromCredits(monthly.usedCredits, snapshot.creditsPerUsd)
+  // Linear projection from the widest window onto a 30-day month. Carries its own
+  // caveat because the scales differ: the weekly allowance caps what a month can
+  // reach, so a low projection is not headroom.
+  const projected = ((): number | undefined => {
+    if (monthlySpent === undefined || monthly === undefined) return undefined
+    const start = Date.parse(monthly.resetsAt) - monthly.durationSeconds * 1000
+    if (!Number.isFinite(start)) return undefined
+    const elapsed = Date.now() - start
+    if (elapsed <= 0) return undefined
+    return monthlySpent / elapsed * 30 * 86_400_000
+  })()
   const percent = monthlySpent === undefined || plan === undefined || plan.monthlyCapUsd <= 0
     ? undefined
     : Math.round((monthlySpent / plan.monthlyCapUsd) * 100)
@@ -132,8 +143,18 @@ export function BillingCard({ snapshot, plan, measuredUsd, baseline, onAlign, ed
             月总额度 {usd(monthlySpent)} / {usd(plan.monthlyCapUsd)}
             {percent !== undefined && `（${percent}%）`}
           </div>
+          {projected !== undefined && (
+            <div style={{ fontSize: '11px', opacity: 0.55 }}>
+              按当前速率外推，整月约 {usd(projected)}
+              {plan.monthlyCapUsd > 0 && `（相当于月额度的 ${Math.round(projected / plan.monthlyCapUsd * 100)}%）`}
+              <span style={{ opacity: 0.9 }}>
+                {' '}— 外推值，仅作参考
+              </span>
+            </div>
+          )}
           <div style={{ fontSize: '11px', opacity: 0.55 }}>
-            月总额度是官方宣传值，实际约束是上方窗口
+            月总额度是官方宣传值，实际约束是上方窗口：Go 每周 $15，四周合计约 $60，
+            因此 $120 的月额度按周口径用不满
           </div>
         </div>
       )}

@@ -76,3 +76,43 @@ export function barColor(remaining: number): string {
   if (remaining <= WARN_AT) return '#e5a00d'
   return '#3b82f6'
 }
+
+/**
+ * Estimate how long the current burn rate takes to exhaust one window.
+ *
+ * Answers the question a user actually acts on — "will I hit the wall before it
+ * resets?" — rather than "what would a month cost". A monthly projection from
+ * weekly windows is not just imprecise, it is misleading: Go grants $15 per week
+ * and advertises $120 per month, but 4.3 weeks of $15 is $65, so a linear
+ * projection reports roughly half the advertised cap and reads as unused
+ * headroom that the weekly window will never allow.
+ *
+ * Returns undefined while nothing has been consumed: no rate exists yet, and
+ * reporting "0 days" would look like immediate exhaustion.
+ * @param window - the quota window with its used credits and reset instant.
+ * @param now - reference instant, epoch milliseconds.
+ * @returns days-to-exhaustion, or undefined when it cannot be estimated.
+ */
+export function daysToExhaust(window: {
+  readonly usedCredits: string
+  readonly limitCredits: string
+  readonly resetsAt: string
+  readonly durationSeconds: number
+}, now: number = Date.now()): number | undefined {
+  const used = Number(window.usedCredits)
+  const limit = Number(window.limitCredits)
+  const reset = Date.parse(window.resetsAt)
+  if (!Number.isFinite(used) || !Number.isFinite(limit) || !Number.isFinite(reset)) return undefined
+  if (used <= 0 || limit <= 0) return undefined
+
+  // Elapsed time is derived from the reset instant rather than tracked
+  // separately: the window is anchored, so `resetsAt - duration` is its start and
+  // needs no extra state to survive a page reload.
+  const start = reset - window.durationSeconds * 1000
+  const elapsed = now - start
+  if (elapsed <= 0) return undefined
+
+  const perMs = used / elapsed
+  if (perMs <= 0) return undefined
+  return (limit - used) / perMs / 86_400_000
+}

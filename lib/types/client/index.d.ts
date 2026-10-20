@@ -1,5 +1,5 @@
 /**
- * Browser half of the plugin: the "DSH OpenDesign Go" settings page.
+ * Browser half of the plugin: the "OpenDesign Go" settings page.
  *
  * The page edits the composition entry's own config through `ctx.configForms`,
  * so every write goes through the same Host validation the composition layer

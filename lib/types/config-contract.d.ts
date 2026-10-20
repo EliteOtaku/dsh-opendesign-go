@@ -8,7 +8,7 @@
 /** Registered provider route. Stable: sessions and presets persist it. */
 export declare const PROVIDER_ID = "dsh-opendesign-go";
 /** Human-readable provider name shown in selectors and diagnostics. */
-export declare const DISPLAY_NAME = "DSH OpenDesign Go";
+export declare const DISPLAY_NAME = "OpenDesign Go";
 /** Settings namespace this plugin installs and the Web page edits. */
 export declare const SETTINGS_NAMESPACE = "llm-opendesign-go";
 /**

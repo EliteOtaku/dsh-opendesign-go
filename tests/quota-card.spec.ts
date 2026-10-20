@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { barColor, resetCountdown } from '../src/client/QuotaCard.tsx'
+import { daysToExhaust } from '../src/client/usage-format.ts'
 
 const NOW = Date.parse('2026-10-19T09:00:00.000Z')
 
@@ -78,5 +79,51 @@ describe('plan spend reconciliation', () => {
 
   it('has no ratio to show when nothing was measured yet', () => {
     expect(planUsdOf('0', 10_000)).toBe(0)
+  })
+})
+
+describe('daysToExhaust', () => {
+  const WEEK = 604_800
+  const END = Date.parse('2026-10-26T00:00:00.000Z')
+
+  it('estimates from the observed burn rate', () => {
+    // Half the window elapsed, a fifth of the allowance used: the remaining 80%
+    // at that rate lasts 4x the elapsed span.
+    const start = END - WEEK * 1000
+    const now = start + (WEEK / 2) * 1000
+    const days = daysToExhaust(
+      { usedCredits: '15000', limitCredits: '75000', resetsAt: new Date(END).toISOString(), durationSeconds: WEEK },
+      now,
+    )
+    // 60000 left at 30000/week = 2 weeks.
+    expect(days).toBeCloseTo(14, 1)
+  })
+
+  it('has no estimate before anything is consumed', () => {
+    // Reporting 0 days here would read as immediate exhaustion.
+    expect(daysToExhaust(
+      { usedCredits: '0', limitCredits: '75000', resetsAt: new Date(END).toISOString(), durationSeconds: WEEK },
+      END - WEEK * 1000 + 1000,
+    )).toBeUndefined()
+  })
+
+  it('has no estimate for unusable input', () => {
+    expect(daysToExhaust(
+      { usedCredits: 'abc', limitCredits: '75000', resetsAt: new Date(END).toISOString(), durationSeconds: WEEK },
+      END,
+    )).toBeUndefined()
+    expect(daysToExhaust(
+      { usedCredits: '100', limitCredits: '0', resetsAt: 'not-a-date', durationSeconds: WEEK },
+      END,
+    )).toBeUndefined()
+  })
+
+  it('has no estimate before the window has started', () => {
+    // A clock skew or a not-yet-anchored window would otherwise divide by a
+    // negative elapsed span and produce a negative duration.
+    expect(daysToExhaust(
+      { usedCredits: '100', limitCredits: '75000', resetsAt: new Date(END).toISOString(), durationSeconds: WEEK },
+      END - WEEK * 1000 - 60_000,
+    )).toBeUndefined()
   })
 })

@@ -10,7 +10,7 @@
 export const PROVIDER_ID = 'dsh-opendesign-go'
 
 /** Human-readable provider name shown in selectors and diagnostics. */
-export const DISPLAY_NAME = 'DSH OpenDesign Go'
+export const DISPLAY_NAME = 'OpenDesign Go'
 
 /** Settings namespace this plugin installs and the Web page edits. */
 export const SETTINGS_NAMESPACE = 'llm-opendesign-go'

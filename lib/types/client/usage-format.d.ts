@@ -48,3 +48,25 @@ export declare function resetCountdown(resetsAt: string, now?: number): string;
  * @returns the fill colour.
  */
 export declare function barColor(remaining: number): string;
+/**
+ * Estimate how long the current burn rate takes to exhaust one window.
+ *
+ * Answers the question a user actually acts on — "will I hit the wall before it
+ * resets?" — rather than "what would a month cost". A monthly projection from
+ * weekly windows is not just imprecise, it is misleading: Go grants $15 per week
+ * and advertises $120 per month, but 4.3 weeks of $15 is $65, so a linear
+ * projection reports roughly half the advertised cap and reads as unused
+ * headroom that the weekly window will never allow.
+ *
+ * Returns undefined while nothing has been consumed: no rate exists yet, and
+ * reporting "0 days" would look like immediate exhaustion.
+ * @param window - the quota window with its used credits and reset instant.
+ * @param now - reference instant, epoch milliseconds.
+ * @returns days-to-exhaustion, or undefined when it cannot be estimated.
+ */
+export declare function daysToExhaust(window: {
+    readonly usedCredits: string;
+    readonly limitCredits: string;
+    readonly resetsAt: string;
+    readonly durationSeconds: number;
+}, now?: number): number | undefined;

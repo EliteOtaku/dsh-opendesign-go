@@ -1,5 +1,5 @@
 /**
- * The "DSH OpenDesign Go" settings page body.
+ * The "OpenDesign Go" settings page body.
  *
  * M4a renders three things: the enable switch, the read-only model list the Go
  * plan grants, and the state of the settings document itself. Nothing here
@@ -275,6 +275,44 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
       </div>
 
       <ModelsCard form={form} config={value} editable={editable} />
+
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '10px',
+        alignItems: 'center',
+        fontSize: '12px',
+        opacity: 0.7,
+        borderTop: '1px solid rgba(128,128,128,0.18)',
+        paddingTop: '12px',
+      }}>
+        <a
+          href="https://github.com/EliteOtaku/dsh-opendesign-go"
+          target="_blank"
+          rel="noreferrer noopener"
+          style={{ color: 'inherit' }}
+        >
+          GitHub 仓库 · 欢迎 Star ★
+        </a>
+        <span style={{ opacity: 0.5 }}>|</span>
+        <a
+          href="https://github.com/EliteOtaku/dsh-opendesign-go#readme"
+          target="_blank"
+          rel="noreferrer noopener"
+          style={{ color: 'inherit' }}
+        >
+          文档
+        </a>
+        <span style={{ opacity: 0.5 }}>|</span>
+        <a
+          href="https://github.com/EliteOtaku/dsh-opendesign-go/issues"
+          target="_blank"
+          rel="noreferrer noopener"
+          style={{ color: 'inherit' }}
+        >
+          反馈问题
+        </a>
+      </div>
     </div>
   )
 }
