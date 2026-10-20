@@ -164,21 +164,16 @@ export function QuotaCard({ snapshot, loading, ledgerCostUsd }: {
 }
 
 /**
- * Reconcile plan credits against this plugin's own measurement.
+ * State what the plan deducted, and how much of it this plugin observed.
  *
- * The two numbers answer different questions and are expected to differ:
+ * No ratio is printed. The two quantities are not comparable by division: the
+ * plan figure covers the whole window across every client, while the measured
+ * figure covers only the requests this plugin served. Dividing them reports how
+ * little traffic went through the plugin, not any difference in accounting — on
+ * a fresh install it read "141.9x", which says nothing true about pricing.
  *
- * - Plan credits are what OpenDesign deducted, converted at the published
- *   10000-credits-per-dollar rate. That is the authoritative figure.
- * - The ledger is what the same tokens would cost at each vendor's list price,
- *   computed from `usage` fields on the responses this plugin actually served.
- *
- * They diverge for real reasons — the plan meters cached input differently from
- * vendor list prices, and it only counts traffic that went through this plugin,
- * not the official client. Printing them side by side with the ratio is the
- * point: if the ratio drifts far from 1, the plan's accounting is not what the
- * vendor prices imply, and the user can see that rather than trusting a single
- * silent number.
+ * Stated as two independent facts, a reader can see that the plugin has served a
+ * small share of the total and draw the right conclusion themselves.
  * @param props - the quota snapshot and the measured cost.
  * @returns the comparison block, or nothing when either side is unavailable.
  */
@@ -199,7 +194,6 @@ function PlanSpendComparison({ snapshot, ledgerCostUsd }: {
   if (planUsd === null) return undefined
   const planSpent = planUsd / rate
   const measured = ledgerCostUsd
-  const ratio = measured === undefined || measured <= 0 ? undefined : planSpent / measured
 
   return (
     <div style={{
@@ -217,13 +211,7 @@ function PlanSpendComparison({ snapshot, ledgerCostUsd }: {
       </div>
       {measured !== undefined && (
         <div>
-          其中经本插件 {measured.toFixed(4)} 美元（按厂商单价估算
-          {ratio !== undefined && <span>{`，相差 ${ratio.toFixed(1)} 倍`}</span>}）
-        </div>
-      )}
-      {measured !== undefined && ratio !== undefined && ratio >= 10 && (
-        <div style={{ opacity: 0.85 }}>
-          差额通常来自套餐对缓存输入与官方客户端的计量口径，不代表单价错误。
+          经本插件 {measured.toFixed(4)} 美元（按厂商单价估算，不含官方客户端与其他工具）
         </div>
       )}
     </div>

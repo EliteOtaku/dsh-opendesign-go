@@ -13,7 +13,7 @@
  *
  * @module dsh-opendesign-go/client/ModelsCard
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
@@ -74,24 +74,14 @@ export function ModelsCard({ form, config, editable }: {
     [config?.modelParamsJson],
   )
   const stored = useMemo(() => parseEnabledModels(config?.enabledModelsJson), [config?.enabledModelsJson])
-  // Optimistic overlay: the Host round-trip can land after the page has already
-  // re-rendered from a fresh snapshot, which is indistinguishable from a click
-  // that did nothing. The pending set paints the new state immediately and is
-  // dropped once the stored value agrees.
+  // Overlay shown while a write is in flight.
+  //
+  // It is released only when the Host reports the write settled, never on a
+  // timer: a timeout fires while the round-trip is still open, which repaints the
+  // old state and reads as the checkbox undoing itself. `pending === undefined`
+  // means the stored value is the truth.
   const [pending, setPending] = useState<readonly string[] | undefined>(undefined)
   const enabled = pending ?? stored
-  useEffect(() => {
-    if (pending === undefined) return
-    const agree = pending.length === stored.length && pending.every((id) => stored.includes(id))
-    if (agree) setPending(undefined)
-    else {
-      // A write that never lands would strand the overlay on a wrong state, so
-      // it is released on a timer and the Host's own value wins.
-      const timer = setTimeout(() => { setPending(undefined) }, 3_000)
-      return () => { clearTimeout(timer) }
-    }
-    return undefined
-  }, [pending, stored])
   const [editing, setEditing] = useState<string | undefined>(undefined)
   const [draftContext, setDraftContext] = useState('')
   const [draftMax, setDraftMax] = useState('')
@@ -122,13 +112,20 @@ export function ModelsCard({ form, config, editable }: {
     setPending(next)
     void form.mutate([{ op: 'set', path: ['enabledModelsJson'], value: allOn ? '' : JSON.stringify(next) }])
       .then((accepted) => {
+        // The overlay is dropped only here. On success the stored value already
+        // says the same thing, so the swap is invisible; on refusal the stored
+        // value is what the user must see, so it is released too.
+        setPending(undefined)
         if (accepted === false) {
           setError('宿主拒绝了这次修改')
           return
         }
         setNotice(next.includes(model) ? `已启用 ${model}` : `已停用 ${model}`)
       })
-      .catch((reason: unknown) => { setError(String(reason)) })
+      .catch((reason: unknown) => {
+        setPending(undefined)
+        setError(String(reason))
+      })
   }
 
   /** Persist one model's overrides, or clear them when both are blank. */

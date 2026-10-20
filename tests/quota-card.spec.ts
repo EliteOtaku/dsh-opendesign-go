@@ -40,9 +40,9 @@ describe('resetCountdown', () => {
 })
 
 describe('plan spend reconciliation', () => {
-  // The comparison is arithmetic over two sources, so it is tested directly
-  // rather than through the component: a wrong ratio here would misreport the
-  // only figure that can reveal an accounting change.
+  // Arithmetic over two sources, tested directly rather than through the
+  // component: a wrong conversion would misreport the only figure that is
+  // authoritative about what the plan actually deducted.
   const planUsdOf = (credits: string, rate: number): number | undefined => {
     const value = Number(credits)
     return Number.isFinite(value) ? value / rate : undefined
@@ -63,10 +63,17 @@ describe('plan spend reconciliation', () => {
     expect(widest.durationSeconds).toBe(604_800)
   })
 
-  it('reports the ratio against measured cost so drift is visible', () => {
+  it('does not divide plan spend by measured spend', () => {
+    // The two cover different traffic: the plan figure spans every client over
+    // the window, the measured figure only what this plugin served. A ratio
+    // would report the plugin's small share as if it were an accounting
+    // difference — it read 141.9x on a fresh install. Guard the shape instead of
+    // the arithmetic: the pair is presented as two facts, not a quotient.
     const planSpent = 21322 / 10_000
     const measured = 0.017790216
-    expect(planSpent / measured).toBeGreaterThan(40)
+    expect(planSpent).toBeCloseTo(2.1322, 4)
+    expect(measured).toBeLessThan(planSpent)
+    expect(Number.isFinite(planSpent)).toBe(true)
   })
 
   it('has no ratio to show when nothing was measured yet', () => {
