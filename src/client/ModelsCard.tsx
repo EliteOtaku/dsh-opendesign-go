@@ -13,7 +13,7 @@
  *
  * @module dsh-opendesign-go/client/ModelsCard
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
@@ -73,7 +73,25 @@ export function ModelsCard({ form, config, editable }: {
     () => parseModelParams(config?.modelParamsJson),
     [config?.modelParamsJson],
   )
-  const enabled = useMemo(() => parseEnabledModels(config?.enabledModelsJson), [config?.enabledModelsJson])
+  const stored = useMemo(() => parseEnabledModels(config?.enabledModelsJson), [config?.enabledModelsJson])
+  // Optimistic overlay: the Host round-trip can land after the page has already
+  // re-rendered from a fresh snapshot, which is indistinguishable from a click
+  // that did nothing. The pending set paints the new state immediately and is
+  // dropped once the stored value agrees.
+  const [pending, setPending] = useState<readonly string[] | undefined>(undefined)
+  const enabled = pending ?? stored
+  useEffect(() => {
+    if (pending === undefined) return
+    const agree = pending.length === stored.length && pending.every((id) => stored.includes(id))
+    if (agree) setPending(undefined)
+    else {
+      // A write that never lands would strand the overlay on a wrong state, so
+      // it is released on a timer and the Host's own value wins.
+      const timer = setTimeout(() => { setPending(undefined) }, 3_000)
+      return () => { clearTimeout(timer) }
+    }
+    return undefined
+  }, [pending, stored])
   const [editing, setEditing] = useState<string | undefined>(undefined)
   const [draftContext, setDraftContext] = useState('')
   const [draftMax, setDraftMax] = useState('')
@@ -99,6 +117,9 @@ export function ModelsCard({ form, config, editable }: {
     // Writing the full catalog back means "all enabled" again; store empty so a
     // future model added to the seed is picked up without re-saving.
     const allOn = next.length === GO_DESIGN_PLAN_MODELS.length
+    // Paint first: a checkbox that stays still while the write is in flight
+    // reads as a broken control even when the write succeeds.
+    setPending(next)
     void form.mutate([{ op: 'set', path: ['enabledModelsJson'], value: allOn ? '' : JSON.stringify(next) }])
       .then((accepted) => {
         if (accepted === false) {

@@ -1,6 +1,6 @@
 /**
- * Reconciliation surface: advertised plan allowance, window spend, alignment,
- * and the vendor-priced cost kept visibly apart from the plan's own metering.
+ * Reconciliation surface: advertised plan allowance, alignment, and the
+ * vendor-priced cost kept visibly apart from the plan's own metering.
  *
  * The card exists because two numbers that look alike are not alike. Plan
  * credits are what OpenDesign deducted; the measured figure is what the same
@@ -15,7 +15,6 @@ import type { ReactElement } from 'react'
 import type { PlanSpec } from '../plans.ts'
 import { creditsToNumber } from '../usage-contract.ts'
 import type { QuotaWindow, UsageSnapshot } from '../usage-contract.ts'
-import { resetCountdown, windowLabel } from './usage-format.ts'
 
 /**
  * Length of the allowance window a monthly figure is comparable to.
@@ -81,47 +80,13 @@ function alignedAtText(at: number): string {
 }
 
 /**
- * One window as a single row: remaining percentage plus remaining money.
- *
- * Remaining, not consumed, to match the console's own wording: a user reading
- * "剩余 88%" beside this row must not see a different pair of numbers.
- * @param props - the window and the credits-per-dollar rate in effect.
- * @returns the row.
- */
-function WindowRow({ window, creditsPerUsd }: {
-  readonly window: QuotaWindow
-  readonly creditsPerUsd: number | undefined
-}): ReactElement {
-  const remaining = window.percentUsed === null ? null : Math.max(0, 100 - window.percentUsed)
-  const remainingUsd = spentFromCredits(window.remainingCredits, creditsPerUsd)
-  const limitUsd = spentFromCredits(window.limitCredits, creditsPerUsd)
-  const label = windowLabel(window.durationSeconds)
-  // The credits themselves are the fallback: they are what the console said,
-  // so a window without a rate still shows something authoritative.
-  const money = remainingUsd !== undefined && limitUsd !== undefined
-    ? `剩余 ${usd(remainingUsd)} / ${usd(limitUsd)}`
-    : `剩余 ${window.remainingCredits} / ${window.limitCredits} credits`
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
-        <span style={{ fontSize: '13px', fontWeight: 500 }}>{label}额度</span>
-        <span style={{ fontSize: '11px', opacity: 0.55 }}>{resetCountdown(window.resetsAt)}</span>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', fontSize: '12px', fontVariantNumeric: 'tabular-nums' }}>
-        <span>{remaining === null ? '剩余 —' : `剩余 ${remaining}%`}</span>
-        <span style={{ opacity: 0.7 }}>{money}</span>
-      </div>
-    </div>
-  )
-}
-
-/**
  * Render the reconciliation card.
  *
- * Block order is fixed — monthly allowance, windows, alignment, equivalent API
- * cost — because the first three narrow from "what was sold" to "what this
- * plugin spent", and the last one is a caveated aside that must stay below the
- * numbers it qualifies.
+ * Block order is fixed — monthly allowance, alignment, equivalent API cost —
+ * because the first two narrow from "what was sold" to "what this plugin
+ * spent", and the last one is a caveated aside that must stay below the numbers
+ * it qualifies. Per-window rows are not repeated here: the quota card above
+ * already shows them, so this card would only print the same figures twice.
  * @param props - snapshot, plan, measured cost, alignment baseline and controls.
  * @returns the billing card.
  */
@@ -168,14 +133,10 @@ export function BillingCard({ snapshot, plan, measuredUsd, baseline, onAlign, ed
             {percent !== undefined && `（${percent}%）`}
           </div>
           <div style={{ fontSize: '11px', opacity: 0.55 }}>
-            月总额度是官方宣传值，实际约束是下方窗口
+            月总额度是官方宣传值，实际约束是上方窗口
           </div>
         </div>
       )}
-
-      {snapshot.windows.map((window) => (
-        <WindowRow key={window.durationSeconds} window={window} creditsPerUsd={snapshot.creditsPerUsd} />
-      ))}
 
       <div style={{ ...divider, display: 'flex', flexDirection: 'column', gap: '6px' }}>
         {baseline === undefined ? (

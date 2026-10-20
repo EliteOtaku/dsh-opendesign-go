@@ -33,10 +33,11 @@ export declare function spentFromCredits(credits: string, creditsPerUsd: number 
 /**
  * Render the reconciliation card.
  *
- * Block order is fixed — monthly allowance, windows, alignment, equivalent API
- * cost — because the first three narrow from "what was sold" to "what this
- * plugin spent", and the last one is a caveated aside that must stay below the
- * numbers it qualifies.
+ * Block order is fixed — monthly allowance, alignment, equivalent API cost —
+ * because the first two narrow from "what was sold" to "what this plugin
+ * spent", and the last one is a caveated aside that must stay below the numbers
+ * it qualifies. Per-window rows are not repeated here: the quota card above
+ * already shows them, so this card would only print the same figures twice.
  * @param props - snapshot, plan, measured cost, alignment baseline and controls.
  * @returns the billing card.
  */
