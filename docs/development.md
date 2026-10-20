@@ -18,9 +18,26 @@ npx tsc -p tsconfig.client.json --noEmit   # 客户端侧类型检查
 npm test               # compile + vitest run
 npm run verify:load    # 用真实 Cordis 运行时加载 lib/ 产物
 npm run test:ci        # check:dist + vitest + verify:load
+npm run test:hosts     # 在多个宿主版本下验证产物（装 peer、查符号、型检、挂载）
 ```
 
 `lib/` 是**提交进仓库**的：Git 安装、npm 包、tarball 都必须免构建即可加载，所以 `compile` 是显式命令，不是生命周期钩子。
+
+## 宿主兼容矩阵
+
+`engines.dsh` 与 `peerDependencies` 里的版本范围是承诺，不是证据。`npm run test:hosts` 把承诺变成证据：对每个受支持的宿主版本，在临时目录里装齐该版本的 12 个 peer（`cordis` 走自己的 4.x 线，不参与版本钉定），然后问三个递进的问题：
+
+| 层 | 抓什么 |
+| --- | --- |
+| `symbols` | 产物从每个 `@deepseek-ai` 包导入的符号是否仍存在。导出被改名或删除时，导入本身不报错、首次调用才炸，所以挂载通过不代表这一层通过。 |
+| `types` | 源码能否用该版本的声明文件型检通过。抓符号还在但签名漂移（参数放宽、可选项搬家）。 |
+| `mount` | 真实 Cordis 运行时是否接受产物入口。抓宿主内部导入和激活期抛错。 |
+
+默认覆盖 `0.2.0-rc.1`（范围下界）、`0.2.0-rc.2`、`0.2.1-rc.2`（当前最新）。用 `HOST_MATRIX_VERSIONS=0.2.0-rc.1,0.2.1-rc.2 npm run test:hosts` 可只跑子集。
+
+**为什么符号检查必须在探测目录内跑**：裸模块名按导入者所在位置向上找 `node_modules`。从仓库里 `import()` 会解析到仓库自己的 `node_modules`（也就是已经装好的版本），等于什么都没验证；用 `file://` 指向包目录也不行，ESM 没有目录解析，会报 `Directory import ... is not supported`。只有让脚本文件本身位于探测目录内，才会用到探测树里的那一份。
+
+这一层是真的会失败：往产物里注入一个不存在的导出，`symbols` 立刻报 `@deepseek-ai/dsh-llm: thisExportDoesNotExist`；往源码写一处类型错误，`types` 立刻报 `TS2322`。两条都实测过。
 
 ## 目录结构
 

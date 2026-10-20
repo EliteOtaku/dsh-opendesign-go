@@ -71,6 +71,7 @@
     "pretest": "npm run compile",
     "verify:load": "node scripts/plugin-smoke.mjs",
     "test:ci": "npm run check:dist && vitest run && npm run verify:load",
+    "test:hosts": "node scripts/host-matrix.mjs",
     "prepublishOnly": "npm run check:dist",
     "sync:profile": "node scripts/sync-profile.mjs --profile desktop",
     "sync:link": "node scripts/sync-profile.mjs --profile desktop --link",

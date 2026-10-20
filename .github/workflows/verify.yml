@@ -27,3 +27,22 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:ci
+
+  # The `engines.dsh` range and the peer ranges are a promise; this job turns
+  # them into evidence by installing each supported host version and checking
+  # the built artifact against it. It runs on Linux only because the probe
+  # installs twelve packages per version, and the host API surface does not
+  # differ by OS — the `core` job already covers Windows paths.
+  hosts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      # `host-matrix` inspects `lib/`, so the artifact must exist first.
+      - run: npm run compile
+      - run: npm run test:hosts
