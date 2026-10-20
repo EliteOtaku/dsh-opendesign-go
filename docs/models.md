@@ -58,16 +58,28 @@
 
 ## 思考等级
 
-插件对**每个模型**都提供四个思考等级，默认 `medium`：
+等级由弱到强共八个，每个模型只展示它接受的那部分：
 
-| ID | 显示名 |
+| ID | 显示名 | 说明 |
+| --- | --- | --- |
+| `none` | 关闭 | 不思考，响应最快 |
+| `minimal` | 最低 | |
+| `low` | 低 | |
+| `medium` | 中 | 多数模型的默认值 |
+| `high` | 高 | |
+| `xhigh` | 较高 | |
+| `ultra` | 极高 | 仅 DeepSeek 系列与 GPT-6 Luna |
+| `max` | 最高 | |
+
+每个模型只显示它真正支持的推理等级，列表来自网关自己的拒绝信息：发送一个非法值，返回的错误里会写明该模型的合法取值集合。网关没有公开文档说明这个字段，实测是唯一可靠来源。
+
+| 模型 | 支持的推理等级 |
 | --- | --- |
-| `minimal` | 最低 |
-| `low` | 低 |
-| `medium` | 中 |
-| `high` | 高 |
+| deepseek-v4.1-flash、deepseek-v4-flash、deepseek-v4-flash-vision-exp、deepseek-v4-pro、gpt-6-luna | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`ultra`、`max` |
+| claude-haiku-5.5、kimi-k2.7-code、mimo-v2.6-flash、mimo-v2.6-pro、hy4-preview | `none` 到 `xhigh`（无 `ultra`） |
+| glm-5.3-flash、glm-5.3-flashx | 仅 `low`、`high`、`max` |
 
-网关接受 `reasoning_effort` 并真正生效——对比不同取值下 `usage.completion_tokens_details.reasoning_tokens` 会随之变化，不是被忽略。但网关不公布按模型的等级表，所以统一提供这四个 OpenAI 兼容名称，而不是为每个模型编造一套。
+选到该模型不支持的值，网关会返回 400。因此插件按模型过滤列表，并把默认等级钳制在合法范围内。
 
 未知模型 ID（不在静态表里的）同样会拿到思考等级列表，因为网关对它服务的每个模型都接受这个参数；隐藏选择器反而会让比本版本更新的 ID 少一个能力。
 
