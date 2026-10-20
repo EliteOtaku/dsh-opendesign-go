@@ -48,11 +48,34 @@ export interface ScanOptions {
  */
 export declare function parseRecoveredProviders(raw: string | undefined): readonly string[];
 /**
+ * Decompress a concatenated frame log one frame at a time.
+ *
+ * Extracted from {@link readSessionLog} so the frame-boundary logic can be
+ * exercised against a decompressor that chains frames, which is what some Node
+ * 24.x builds do. The local runtime here does not, so a test that only used the
+ * real one would pass whether or not the algorithm were correct.
+ *
+ * @param bytes - the whole log file.
+ * @param decompress - one-shot decoder, defaulting to the runtime's zstd.
+ * @returns the concatenated plaintext; frames that do not decode end the walk.
+ */
+export declare function decodeFrames(bytes: Buffer, decompress?: (slice: Buffer) => Buffer): string;
+/**
  * Decompress every frame of one session log.
  *
- * The harness appends each event as its own frame, so a single
- * `zstdDecompressSync` call stops after the first one and silently reports a
- * nearly empty session. Walking the magic bytes is what makes the rest readable.
+ * The harness appends each event as its own frame, so the plaintext is a
+ * concatenation of several frames. Getting all of them requires care in two
+ * directions. Decompressing once and stopping leaves only the first frame, which
+ * is how this was first broken: a 530KB log decoded to 280 bytes. But walking
+ * with `decompress(buffer.subarray(offset))` is wrong in the other direction on
+ * runtimes whose buffered zstd call already consumes concatenated frames — each
+ * pass returns every remaining frame, so frames overlap and calls are counted
+ * more than once.
+ *
+ * Slicing at frame boundaries removes the dependence on that runtime detail: a
+ * slice holds exactly one frame, so one decode yields exactly one event's worth
+ * of text whether or not the runtime chains frames on its own.
+ *
  * @param path - absolute path to a `session.v4.jsonl.zstd` file.
  * @returns the concatenated plaintext, or undefined when it cannot be read.
  */

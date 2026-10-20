@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { zstdCompressSync } from 'node:zlib'
+import { zstdCompressSync, zstdDecompressSync } from 'node:zlib'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +7,7 @@ import {
   DEFAULT_RECOVERED_PROVIDERS,
   callsFromSessionText,
   parseRecoveredProviders,
+  decodeFrames,
   readSessionLog,
   scanSessions,
 } from '../src/session-usage.ts'
@@ -171,6 +172,96 @@ describe('readSessionLog', () => {
 
   it('returns undefined for a path that does not exist', () => {
     expect(readSessionLog(join(tmpdir(), 'od-missing', 'session.v4.jsonl.zstd'))).toBeUndefined()
+  })
+
+  it('does not double-count frames on a runtime that chains them', () => {
+    // Node's buffered zstd call gained the ability to consume concatenated
+    // frames in some 24.x builds. The earlier walk fed it `bytes.subarray(offset)`
+    // and then advanced to the next magic, so on such a runtime every pass
+    // returned all remaining frames and three events were counted as five.
+    //
+    // This machine's runtime does not chain, so the real decompressor cannot
+    // reproduce the bug. `decodeFrames` takes a decoder for exactly this reason:
+    // `chaining` below decodes every remaining frame in one pass, which is the
+    // behaviour that broke.
+    const dir = mkdtempSync(join(tmpdir(), 'od-chain-'))
+    try {
+      const path = join(dir, 'session.v4.jsonl.zstd')
+      const lines = Array.from({ length: 5 }, (_, index) =>
+        messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: index + 1 }),
+      )
+      const frames = lines.map((line) => zstdCompressSync(Buffer.from(`${line}\n`, 'utf8')))
+      const bytes = Buffer.concat(frames)
+      writeFileSync(path, bytes)
+
+      /** A decoder that returns every remaining frame, like some 24.x builds. */
+      const chaining = (slice: Buffer): Buffer => {
+        let out = ''
+        let rest = slice
+        while (rest.length > 0) {
+          try {
+            out += zstdDecompressSync(rest).toString('utf8')
+          } catch {
+            break
+          }
+          const next = rest.indexOf(Buffer.from([0x28, 0xb5, 0x2f, 0xfd]), 4)
+          if (next < 0) break
+          rest = rest.subarray(next)
+        }
+        return Buffer.from(out, 'utf8')
+      }
+
+      // Sanity: the mock really does chain, or this test proves nothing.
+      expect(chaining(bytes).toString('utf8').split('\n').filter(Boolean)).toHaveLength(5)
+
+      const text = decodeFrames(bytes, chaining)
+      expect(text.split('\n').filter(Boolean)).toHaveLength(5)
+      expect(callsFromSessionText(text).map((call) => call.inputTokens)).toEqual([1, 2, 3, 4, 5])
+
+      // The real decoder must agree with the chaining one.
+      expect(callsFromSessionText(readSessionLog(path) ?? '').map((call) => call.inputTokens)).toEqual([1, 2, 3, 4, 5])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a frame whose payload happens to contain the magic bytes', () => {
+    // The walk treats magic bytes as candidate boundaries, so a compressed
+    // payload containing that sequence splits one frame in two. Widening the
+    // slice until it decodes is what recovers it; without that, the rest of the
+    // log would be dropped as undecodable.
+    const dir = mkdtempSync(join(tmpdir(), 'od-magic-'))
+    try {
+      const path = join(dir, 'session.v4.jsonl.zstd')
+      // Incompressible content keeps the magic sequence inside the payload.
+      const filler = Array.from({ length: 4096 }, (_, index) => (index * 2654435761) % 251)
+      const line = messageEvent('opendesign', 'deepseek-v4.1-flash', {
+        inputTokens: 7,
+        cacheReadTokens: filler.reduce((sum, value) => sum + value, 0),
+      })
+      writeFileSync(path, Buffer.concat([
+        zstdCompressSync(Buffer.from(`${line}\n`)),
+        zstdCompressSync(Buffer.from(`${messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 8 })}\n`)),
+      ]))
+
+      const calls = callsFromSessionText(readSessionLog(path) ?? '')
+      expect(calls.map((call) => call.inputTokens)).toEqual([7, 8])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reads a plain-text log that carries no zstd frames', () => {
+    // A fixture or a future format has no frames at all; reporting an empty
+    // session for readable text would look like "no spend" rather than "unread".
+    const dir = mkdtempSync(join(tmpdir(), 'od-plain-'))
+    try {
+      const path = join(dir, 'session.v4.jsonl.zstd')
+      writeFileSync(path, `${messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 9 })}\n`)
+      expect(callsFromSessionText(readSessionLog(path) ?? '').map((call) => call.inputTokens)).toEqual([9])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

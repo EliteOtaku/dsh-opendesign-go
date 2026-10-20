@@ -85,11 +85,89 @@ export function parseRecoveredProviders(raw: string | undefined): readonly strin
 }
 
 /**
+ * Find every candidate frame start in a concatenated log.
+ *
+ * A magic sequence can legitimately occur inside a compressed payload, so these
+ * are candidates rather than boundaries; {@link readSessionLog} confirms each
+ * one by trying to decode the slice between it and the next candidate.
+ * @param bytes - the whole log file.
+ * @returns ascending offsets of each magic occurrence.
+ */
+function frameStarts(bytes: Buffer): number[] {
+  const starts: number[] = []
+  let offset = bytes.indexOf(ZSTD_MAGIC, 0)
+  while (offset >= 0) {
+    starts.push(offset)
+    offset = bytes.indexOf(ZSTD_MAGIC, offset + 4)
+  }
+  return starts
+}
+
+/**
+ * Decompress a concatenated frame log one frame at a time.
+ *
+ * Extracted from {@link readSessionLog} so the frame-boundary logic can be
+ * exercised against a decompressor that chains frames, which is what some Node
+ * 24.x builds do. The local runtime here does not, so a test that only used the
+ * real one would pass whether or not the algorithm were correct.
+ *
+ * @param bytes - the whole log file.
+ * @param decompress - one-shot decoder, defaulting to the runtime's zstd.
+ * @returns the concatenated plaintext; frames that do not decode end the walk.
+ */
+export function decodeFrames(
+  bytes: Buffer,
+  decompress: (slice: Buffer) => Buffer = zstdDecompressSync,
+): string {
+  const starts = frameStarts(bytes)
+  if (starts.length === 0) {
+    // Not a zstd log. A fixture or a future format may still be plain text, so
+    // hand it back as-is rather than reporting an empty session.
+    return bytes.toString('utf8')
+  }
+  let text = ''
+  let index = 0
+  while (index < starts.length) {
+    const start = starts[index]
+    if (start === undefined) break
+    // Widen the slice until it decodes. A payload containing the magic bytes
+    // splits one frame in two, and only the widened slice is valid zstd.
+    let decoded: string | undefined
+    let next = index + 1
+    while (next <= starts.length) {
+      const end = next < starts.length ? starts[next] : bytes.length
+      if (end === undefined) break
+      try {
+        decoded = decompress(bytes.subarray(start, end)).toString('utf8')
+        break
+      } catch {
+        next += 1
+      }
+    }
+    // A truncated tail is normal for a log being appended; keep what decoded.
+    if (decoded === undefined) break
+    text += decoded
+    index = next
+  }
+  return text
+}
+
+/**
  * Decompress every frame of one session log.
  *
- * The harness appends each event as its own frame, so a single
- * `zstdDecompressSync` call stops after the first one and silently reports a
- * nearly empty session. Walking the magic bytes is what makes the rest readable.
+ * The harness appends each event as its own frame, so the plaintext is a
+ * concatenation of several frames. Getting all of them requires care in two
+ * directions. Decompressing once and stopping leaves only the first frame, which
+ * is how this was first broken: a 530KB log decoded to 280 bytes. But walking
+ * with `decompress(buffer.subarray(offset))` is wrong in the other direction on
+ * runtimes whose buffered zstd call already consumes concatenated frames — each
+ * pass returns every remaining frame, so frames overlap and calls are counted
+ * more than once.
+ *
+ * Slicing at frame boundaries removes the dependence on that runtime detail: a
+ * slice holds exactly one frame, so one decode yields exactly one event's worth
+ * of text whether or not the runtime chains frames on its own.
+ *
  * @param path - absolute path to a `session.v4.jsonl.zstd` file.
  * @returns the concatenated plaintext, or undefined when it cannot be read.
  */
@@ -100,20 +178,7 @@ export function readSessionLog(path: string): string | undefined {
   } catch {
     return undefined
   }
-  let text = ''
-  let offset = 0
-  while (offset < bytes.length) {
-    try {
-      text += zstdDecompressSync(bytes.subarray(offset)).toString('utf8')
-    } catch {
-      // A truncated tail is normal for a log being appended; keep what decoded.
-      break
-    }
-    const next = bytes.indexOf(ZSTD_MAGIC, offset + 4)
-    if (next < 0) break
-    offset = next
-  }
-  return text
+  return decodeFrames(bytes)
 }
 
 /**
