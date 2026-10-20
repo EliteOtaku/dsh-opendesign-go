@@ -34,6 +34,7 @@ import type { RouteDiagnostics } from './diagnostics.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { parseRecoveredProviders, scanSessions } from './session-usage.ts'
+import { readDue } from './quota-cadence.ts'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
@@ -41,6 +42,12 @@ import type { UsageSnapshot } from './usage-contract.ts'
 
 /** How often a failed quota read is retried before giving up for the session. */
 const MAX_USAGE_RETRIES = 6
+
+/** How often a configuration change is noticed, in milliseconds. */
+const FAST_WATCH_MS = 300
+
+/** Steady-state quota read interval, in milliseconds. */
+const SLOW_POLL_MS = 5_000
 
 /** Local usage report window: the trailing 30 days. */
 const REPORT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
@@ -185,28 +192,57 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   void refreshIfConfigured()
   let lastUsageKey = `${current().useVelaCredential}|${current().sessionRef}|${current().workspaceId}`
   let retries = 0
+  /** Read once, recording whether the result was usable. */
+  const tick = (force: boolean): void => {
+    const config = current()
+    const key = `${config.useVelaCredential}|${config.sessionRef}|${config.workspaceId}`
+    const changed = key !== lastUsageKey
+    if (changed) {
+      lastUsageKey = key
+      retries = 0
+    }
+    if (!force && !readDue({
+      changed,
+      retries,
+      maxRetries: MAX_USAGE_RETRIES,
+      wantsUsage: wantsUsage(),
+    })) return
+    if (!changed) retries += 1
+    void refreshIfConfigured().then((snapshot) => {
+      if (usable(snapshot)) retries = MAX_USAGE_RETRIES
+    })
+  }
+
   ctx.effect(() => {
     // The config document has no change event on this host, so the same values
-    // are compared on a short timer. The interval is deliberately coarse: each
-    // read costs a subprocess (or a network call) and a quota bar does not need
-    // seconds.
-    const timer = setInterval(() => {
+    // are compared on a timer. The watch runs faster than the read because the
+    // read spawns a CLI process: a user who has just flipped the vela switch is
+    // watching the card, and a five-second wait reads as a dead control, so a
+    // change triggers an immediate read while steady state stays cheap.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const step = (): void => {
+      // `tick` queues the read and returns; overlapping reads are already
+      // collapsed inside refreshIfConfigured by the usage cache key.
+      tick(false)
+      timer = setTimeout(step, SLOW_POLL_MS)
+    }
+    const watch = setInterval(() => {
       const config = current()
       const key = `${config.useVelaCredential}|${config.sessionRef}|${config.workspaceId}`
-      const changed = key !== lastUsageKey
-      if (changed) {
-        lastUsageKey = key
-        retries = 0
+      if (key === lastUsageKey) return
+      // A change is the user waiting on a result: read now rather than at the
+      // next scheduled tick.
+      if (timer !== undefined) {
+        clearTimeout(timer)
+        timer = undefined
       }
-      // `changed` forces a read; otherwise retry only while the last attempt
-      // produced nothing usable, and only a few times.
-      if (!changed && (retries >= MAX_USAGE_RETRIES || !wantsUsage())) return
-      if (!changed) retries += 1
-      void refreshIfConfigured().then((snapshot) => {
-        if (usable(snapshot)) retries = MAX_USAGE_RETRIES
-      })
-    }, 5_000)
-    return () => { clearInterval(timer) }
+      step()
+    }, FAST_WATCH_MS)
+    timer = setTimeout(step, SLOW_POLL_MS)
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+      clearInterval(watch)
+    }
   })
 
   // Local usage ledger: every request this plugin serves, priced with the public
