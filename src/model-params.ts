@@ -9,6 +9,10 @@
  */
 import type { ModelModality } from '@deepseek-ai/dsh-llm'
 
+/** A reasoning effort id the gateway accepts for at least one model. */
+export type ReasoningEffortName =
+  | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'ultra' | 'max'
+
 /** One model's request parameters, after merging defaults with overrides. */
 export interface ModelParams {
   /** Maximum combined prompt and response tokens. */
@@ -17,6 +21,15 @@ export interface ModelParams {
   readonly maxTokens: number
   /** Accepted request modalities. */
   readonly inputModalities: readonly ModelModality[]
+  /**
+   * Reasoning efforts this model accepts, weakest first.
+   *
+   * Per model because the gateway rejects values a neighbouring model takes:
+   * GLM accepts three, Kimi stops at `xhigh`, and only the DeepSeek family and
+   * Luna take `ultra`. Offering one shared list produced 400s on some models and
+   * hid the top level on others.
+   */
+  readonly reasoningEfforts: readonly ReasoningEffortName[]
 }
 
 /**
@@ -48,31 +61,31 @@ export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
   // Anthropic: 1M context (widened from the earlier 200K) and 128K max output.
   // The context figure is independently confirmed: overflowing the endpoint
   // reports "maximum context length is 1000000 tokens".
-  'claude-haiku-5.5': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
+  'claude-haiku-5.5': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','max'] },
   // api-docs.deepseek.com/zh-cn/quick_start/pricing: 1M context, 384K output.
   // The two retired ids route to V4.1-Flash per that page's footnote 1.
-  'deepseek-v4-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'] },
-  'deepseek-v4-flash-vision-exp': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'] },
-  'deepseek-v4-pro': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'] },
-  'deepseek-v4.1-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'] },
+  'deepseek-v4-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
+  'deepseek-v4-flash-vision-exp': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
+  'deepseek-v4-pro': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
+  'deepseek-v4.1-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
   // docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash and its English mirror
   // docs.z.ai/guides/vlm/glm-5.3-flash both state 1M context, 128K max output.
-  'glm-5.3-flash': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
-  'glm-5.3-flashx': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
+  'glm-5.3-flash': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['low','high','max'] },
+  'glm-5.3-flashx': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['low','high','max'] },
   // OpenAI: 1,050,000 total context, 922,000 max input, 128,000 max output.
   // The three figures are consistent — 922000 + 128000 = 1050000 — which is the
   // same shape as Hy4 Preview's 960000 + 64000. Note that a 1.5M-token prompt
   // was accepted without an error, so the endpoint does not enforce this bound
   // itself; the documented limit is the one used here.
-  'gpt-6-luna': { contextWindow: 1_050_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
+  'gpt-6-luna': { contextWindow: 1_050_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
   // tencentcloud.com/techpedia/148044: 1M context, 960K max input, 64K output.
-  'hy4-preview': { contextWindow: 1_000_000, maxTokens: 64_000, inputModalities: ['text'] },
+  'hy4-preview': { contextWindow: 1_000_000, maxTokens: 64_000, inputModalities: ['text'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','max'] },
   // platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart: 256K context, and
   // the endpoint reports "Range of max_tokens should be [1, 262144]".
-  'kimi-k2.7-code': { contextWindow: 262_144, maxTokens: 262_144, inputModalities: ['text', 'image'] },
+  'kimi-k2.7-code': { contextWindow: 262_144, maxTokens: 262_144, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','max'] },
   // mimo.mi.com/docs/zh-CN/quick-start/summary/model: 1M context, 128K output.
-  'mimo-v2.6-flash': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
-  'mimo-v2.6-pro': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'] },
+  'mimo-v2.6-flash': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','max'] },
+  'mimo-v2.6-pro': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','max'] },
 }
 
 export const MIN_CONTEXT_WINDOW = 1_000
@@ -133,6 +146,7 @@ export function paramsOf(
     contextWindow: clamp(override.contextWindow, base.contextWindow, MIN_CONTEXT_WINDOW, MAX_CONTEXT_WINDOW),
     maxTokens: clamp(override.maxTokens, base.maxTokens, MIN_MAX_TOKENS, MAX_MAX_TOKENS),
     inputModalities: base.inputModalities,
+    reasoningEfforts: base.reasoningEfforts,
   }
 }
 
@@ -151,19 +165,25 @@ function clamp(value: number | undefined, fallback: number, min: number, max: nu
 }
 
 /**
- * The reasoning efforts this plugin offers for every model.
+ * Every reasoning effort any model on this plan accepts, ordered weakest first.
  *
- * The gateway accepts `reasoning_effort` on Chat Completions and honours it —
- * verified by comparing `usage.completion_tokens_details.reasoning_tokens`
- * across the four values, which change with the setting rather than being
- * ignored. It publishes no per-model list, so the four OpenAI-compatible names
- * are offered uniformly rather than invented per model.
+ * Discovered by sending an invalid value and reading the gateway's own rejection,
+ * which lists the accepted set per model — the gateway publishes no documentation
+ * for this field. The order is what a picker renders, so it runs none → max.
+ *
+ * `none` is absent from the old four-value list this file used to carry, and
+ * `ultra`/`max` were both missing, which is why the highest selectable effort for
+ * DeepSeek sat two steps below what the model actually accepts.
  */
 export const REASONING_EFFORTS = [
+  { id: 'none', name: '关闭' },
   { id: 'minimal', name: '最低' },
   { id: 'low', name: '低' },
   { id: 'medium', name: '中' },
   { id: 'high', name: '高' },
+  { id: 'xhigh', name: '较高' },
+  { id: 'ultra', name: '极高' },
+  { id: 'max', name: '最高' },
 ] as const
 
 /** Reasoning effort used when a caller omits one. */

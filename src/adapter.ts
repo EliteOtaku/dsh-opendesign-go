@@ -38,6 +38,7 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import { listSeedModels, seedModel } from './catalog.ts'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS, paramsOf } from './model-params.ts'
+import type { ModelParams } from './model-params.ts'
 import { DISPLAY_NAME, type OpenDesignConfig } from './config-contract.ts'
 import { toChatMessages, toChatTools } from './conversion.ts'
 import type { ImageDataUrlResolver } from './conversion.ts'
@@ -93,6 +94,30 @@ export interface OpenDesignAdapterOptions {
    * @returns a `data:` URL, or undefined when the bytes are not readable.
    */
   imageDataUrl?: (attachment: unknown) => string | undefined
+}
+
+/**
+ * Build a model's effort list, defaulting to the full set when it is unknown.
+ *
+ * The default effort is clamped into the offered list: leaving it at `medium`
+ * for a model that only takes low/high/max would preselect a value the gateway
+ * then rejects on the first request.
+ * @param params - resolved parameters, or undefined for an unknown model id.
+ * @returns the efforts to advertise and the one to preselect.
+ */
+function reasoningFor(params: ModelParams | undefined): { efforts: { id: ReasoningEffortId, name: string }[], defaultEffort: ReasoningEffortId } {
+  const allowed = params?.reasoningEfforts
+  const efforts = (allowed === undefined
+    ? REASONING_EFFORTS.map((effort) => effort.id)
+    : REASONING_EFFORTS.filter((effort) => allowed.includes(effort.id)).map((effort) => effort.id))
+  const offered = efforts.length === 0 ? REASONING_EFFORTS.map((effort) => effort.id) : efforts
+  const fallback = offered.includes(DEFAULT_REASONING_EFFORT) ? DEFAULT_REASONING_EFFORT : offered[0]!
+  return {
+    efforts: REASONING_EFFORTS
+      .filter((effort) => offered.includes(effort.id))
+      .map((effort) => ({ id: ReasoningEffortId(effort.id), name: effort.name })),
+    defaultEffort: ReasoningEffortId(fallback),
+  }
 }
 
 /** One text or reasoning block accumulated while streaming. */
@@ -189,15 +214,15 @@ export class OpenDesignAdapter extends LlmAdapter {
   async resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
     const row = seedModel(model)
     const params = paramsOf(model, this.#options.config().modelParams)
-    const reasoning = {
-      efforts: REASONING_EFFORTS.map((effort) => ({ id: ReasoningEffortId(effort.id), name: effort.name })),
-      defaultEffort: ReasoningEffortId(DEFAULT_REASONING_EFFORT),
-    }
+    // Offer only what this model takes. The gateway rejects a value its
+    // neighbour accepts — GLM answers 400 outside low/high/max, and Kimi stops at
+    // xhigh — so a shared list both errored on some models and hid the top level
+    // on others.
+    const reasoning = reasoningFor(params)
     if (row === undefined) {
-      // An unknown id still gets the effort list: the gateway accepts the
-      // parameter for every model it serves, and hiding the selector would be a
-      // regression for ids newer than this build.
-      return { provider, id: model, name: model, reasoning }
+      // An unknown id keeps the full list: the id is newer than this build and
+      // its accepted set is unknown, so hiding levels would be the worse error.
+      return { provider, id: model, name: model, reasoning: reasoningFor(undefined) }
     }
     return {
       provider,

@@ -142,8 +142,36 @@ describe('enabled models', () => {
 })
 
 describe('reasoning efforts', () => {
-  it('offers the four values the gateway honours', () => {
-    expect(REASONING_EFFORTS.map((effort) => effort.id)).toEqual(['minimal', 'low', 'medium', 'high'])
+  it('offers every effort some model accepts, weakest first', () => {
+    // The gateway names its accepted set in the rejection message for an invalid
+    // value; this list is the union across models. It previously held only four
+    // values, which put DeepSeek's ceiling two steps below what it accepts and
+    // omitted `none` entirely.
+    expect(REASONING_EFFORTS.map((effort) => effort.id)).toEqual([
+      'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra', 'max',
+    ])
+  })
+
+  it('gives each model only the efforts the gateway accepts for it', () => {
+    // Verified per model by sending an invalid value and reading the rejection.
+    const deepseek = MODEL_DEFAULTS['deepseek-v4.1-flash']
+    expect(deepseek?.reasoningEfforts).toContain('ultra')
+    expect(deepseek?.reasoningEfforts).toContain('max')
+
+    // GLM answers 400 outside these three.
+    expect(MODEL_DEFAULTS['glm-5.3-flash']?.reasoningEfforts).toEqual(['low', 'high', 'max'])
+
+    // Kimi stops one step below the DeepSeek family.
+    expect(MODEL_DEFAULTS['kimi-k2.7-code']?.reasoningEfforts).not.toContain('ultra')
+    expect(MODEL_DEFAULTS['kimi-k2.7-code']?.reasoningEfforts).toContain('xhigh')
+  })
+
+  it('gives every model a non-empty effort list', () => {
+    // An empty list would advertise a model with no selectable effort, which the
+    // picker renders as a control that does nothing.
+    for (const [model, params] of Object.entries(MODEL_DEFAULTS)) {
+      expect(params.reasoningEfforts.length, model).toBeGreaterThan(0)
+    }
   })
 
   it('names a default that is one of the offered values', () => {

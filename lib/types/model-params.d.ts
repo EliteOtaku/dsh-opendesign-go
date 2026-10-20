@@ -8,6 +8,8 @@
  * @module dsh-opendesign-go/model-params
  */
 import type { ModelModality } from '@deepseek-ai/dsh-llm';
+/** A reasoning effort id the gateway accepts for at least one model. */
+export type ReasoningEffortName = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'ultra' | 'max';
 /** One model's request parameters, after merging defaults with overrides. */
 export interface ModelParams {
     /** Maximum combined prompt and response tokens. */
@@ -16,6 +18,15 @@ export interface ModelParams {
     readonly maxTokens: number;
     /** Accepted request modalities. */
     readonly inputModalities: readonly ModelModality[];
+    /**
+     * Reasoning efforts this model accepts, weakest first.
+     *
+     * Per model because the gateway rejects values a neighbouring model takes:
+     * GLM accepts three, Kimi stops at `xhigh`, and only the DeepSeek family and
+     * Luna take `ultra`. Offering one shared list produced 400s on some models and
+     * hid the top level on others.
+     */
+    readonly reasoningEfforts: readonly ReasoningEffortName[];
 }
 /**
  * A user override. Every field is optional: an omitted field keeps the default,
@@ -68,15 +79,20 @@ export declare function parseModelParams(raw: string | undefined): Record<string
  */
 export declare function paramsOf(model: string, overrides: Readonly<Record<string, ModelParamOverride>> | undefined): ModelParams | undefined;
 /**
- * The reasoning efforts this plugin offers for every model.
+ * Every reasoning effort any model on this plan accepts, ordered weakest first.
  *
- * The gateway accepts `reasoning_effort` on Chat Completions and honours it —
- * verified by comparing `usage.completion_tokens_details.reasoning_tokens`
- * across the four values, which change with the setting rather than being
- * ignored. It publishes no per-model list, so the four OpenAI-compatible names
- * are offered uniformly rather than invented per model.
+ * Discovered by sending an invalid value and reading the gateway's own rejection,
+ * which lists the accepted set per model — the gateway publishes no documentation
+ * for this field. The order is what a picker renders, so it runs none → max.
+ *
+ * `none` is absent from the old four-value list this file used to carry, and
+ * `ultra`/`max` were both missing, which is why the highest selectable effort for
+ * DeepSeek sat two steps below what the model actually accepts.
  */
 export declare const REASONING_EFFORTS: readonly [{
+    readonly id: "none";
+    readonly name: "关闭";
+}, {
     readonly id: "minimal";
     readonly name: "最低";
 }, {
@@ -88,6 +104,15 @@ export declare const REASONING_EFFORTS: readonly [{
 }, {
     readonly id: "high";
     readonly name: "高";
+}, {
+    readonly id: "xhigh";
+    readonly name: "较高";
+}, {
+    readonly id: "ultra";
+    readonly name: "极高";
+}, {
+    readonly id: "max";
+    readonly name: "最高";
 }];
 /** Reasoning effort used when a caller omits one. */
 export declare const DEFAULT_REASONING_EFFORT = "medium";
