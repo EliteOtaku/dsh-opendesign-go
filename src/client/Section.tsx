@@ -24,6 +24,7 @@ import { QuotaCard } from './QuotaCard.tsx'
 import { BillingCard } from './BillingCard.tsx'
 import { parseBaseline, parsePlanOverrides, planOf } from '../plans.ts'
 import { parseUpdate } from '../update-check.ts'
+import { explainRouteProblem } from './route-explanation.ts'
 import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 import { ModelsCard } from './ModelsCard.tsx'
@@ -130,6 +131,9 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   // means either up to date or the registry was unreachable; both read the same
   // way to a user, so no banner appears.
   const update = useMemo(() => parseUpdate(value?.updateJson), [value?.updateJson])
+  // Explains an empty model picker where the status line alone was not enough:
+  // "未注册" states the symptom, not the cause or the fix.
+  const routeProblem = useMemo(() => explainRouteProblem(routeState), [routeState])
 
   /**
    * Ask the host for a reading now.
@@ -230,6 +234,28 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
             诊断：{snapshot.status} / revision={String(snapshot.revision)} / writable={String(snapshot.writable)}
           </span>
           <button type="button" onClick={retry} style={buttonStyle}>重新加载</button>
+        </div>
+      )}
+
+      {routeProblem !== undefined && (
+        <div style={{
+          // Warning colours, not error: the plugin loaded and the page works. What
+          // is missing is the route, and every listed cause is recoverable.
+          border: '1px solid rgba(217,119,6,0.45)',
+          background: 'rgba(217,119,6,0.09)',
+          borderRadius: '8px',
+          padding: '12px 14px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+        }}>
+          <div style={{ fontSize: '13px', fontWeight: 500 }}>⚠ {routeProblem.title}</div>
+          <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', opacity: 0.85, lineHeight: 1.7 }}>
+            {routeProblem.causes.map((cause) => <li key={cause.text}>{cause.text}</li>)}
+          </ul>
+          <div style={{ fontSize: '11px', opacity: 0.6 }}>
+            最新状态见页面下方的「路由状态」。
+          </div>
         </div>
       )}
 
