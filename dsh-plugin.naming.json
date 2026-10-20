@@ -8,15 +8,24 @@
     "packageName": "dsh-opendesign-go"
   },
   "names": {
-    "pluginNames": ["llm-opendesign-go"],
-    "loaderIds": ["opendesign-go"],
-    "services": ["openDesignGoUsage", "openDesignGoModels"],
+    "pluginNames": [
+      "llm-opendesign-go"
+    ],
+    "loaderIds": [
+      "opendesign-go"
+    ],
+    "services": [
+      "openDesignGoUsage",
+      "openDesignGoUsageLedger"
+    ],
     "tools": [],
     "commands": [],
     "skills": [],
     "skillProviders": [],
     "events": [],
-    "settingsNamespaces": ["llm-opendesign-go"],
+    "settingsNamespaces": [
+      "llm-opendesign-go"
+    ],
     "routes": []
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-opendesign-go",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "format": "esm",
   "entry": "src/index.ts"
 }
