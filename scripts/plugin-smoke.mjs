@@ -37,26 +37,43 @@ await new Promise((resolve) => setTimeout(resolve, 50))
 //    report through the host logger instead of throwing at load.
 const lines = []
 const noop = () => {}
-const stub = {
+const provided = new Map()
+/** Cleanups for whatever the plugin registered; run before the process exits. */
+const disposers = []
+/** A context stub carrying every member the plugin calls during activation. */
+const surface = (getter) => ({
   logger: { info: (m) => lines.push(m), warn: (m) => lines.push(m), error: (m) => lines.push(m) },
   effect: (fn) => {
     const dispose = fn()
-    return () => {
+    const cleanup = () => {
       if (typeof dispose === 'function') dispose()
     }
+    // Collected so the process can exit: the plugin starts a quota-refresh
+    // interval, and a smoke test that leaves it running never terminates.
+    disposers.push(cleanup)
+    return cleanup
   },
-  get: () => undefined,
-  // The child context mirrors a host that has no settings service: the plugin
-  // must degrade to a log line instead of throwing.
-  inject: (_deps, callback) => callback({
-    on: noop,
-    get: () => undefined,
-    logger: stub.logger,
-    effect: stub.effect,
-    settings: undefined,
-  }),
-}
+  get: getter,
+  // `provide` then `set` is the documented order, and omitting either makes the
+  // real runtime throw inside apply — which this smoke test exists to catch
+  // before the Host does.
+  on: () => noop,
+  provide: (name) => { provided.set(name, undefined) },
+  set: (name, value) => {
+    if (!provided.has(name)) throw new Error(`cannot set property "${name}" without provide`)
+    provided.set(name, value)
+  },
+  inject: (_deps, callback) => {
+    // The child mirrors a host with no settings or attachments service: the
+    // plugin must degrade to a log line instead of throwing.
+    callback(surface(getter))
+  },
+})
+const stub = surface(() => undefined)
 plugin.apply(stub)
 assert(lines.some((line) => line.includes('llm-opendesign-go')), 'apply did not report through the host logger')
+
+// Release every interval the plugin started, or Node keeps the loop alive.
+for (const dispose of disposers) dispose()
 
 console.log('plugin-smoke: built artifact loads and mounts on Cordis')
