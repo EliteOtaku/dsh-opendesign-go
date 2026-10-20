@@ -12,6 +12,15 @@ export const PROVIDER_ID = 'dsh-opendesign-go'
 /** Human-readable provider name shown in selectors and diagnostics. */
 export const DISPLAY_NAME = 'OpenDesign Go'
 
+/**
+ * This build's version, mirrored from package.json by the build step.
+ *
+ * Read from a constant rather than package.json at runtime: the built bundle is
+ * a single file with no reliable path back to its own package, and the update
+ * check needs a value it can compare without filesystem access.
+ */
+export const PLUGIN_VERSION = '0.1.3'
+
 /** Settings namespace this plugin installs and the Web page edits. */
 export const SETTINGS_NAMESPACE = 'llm-opendesign-go'
 
@@ -154,6 +163,14 @@ export interface OpenDesignConfig {
    * and reads immediately.
    */
   readonly refreshNonce: string
+  /**
+   * Newest published version, when it is newer than this build.
+   *
+   * Empty means either "up to date" or "the registry could not be reached". The
+   * two are not distinguished because neither is actionable, and surfacing an
+   * error for a failed background check would be noise in a settings page.
+   */
+  readonly updateJson: string
   /** Parsed enabled-model list, filled by `readConfig`; empty means all. */
   readonly enabledModels?: readonly string[]
   /** Parsed override table, filled by `readConfig`. */

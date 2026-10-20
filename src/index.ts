@@ -21,7 +21,7 @@ import type { AdapterRegistrationHandle } from '@deepseek-ai/dsh-llm'
 import { OpenDesignAdapter } from './adapter.ts'
 import { Config, assertApiKeyEnv, assertBaseURL, readConfig } from './config.ts'
 import type { LiveConfig } from './config.ts'
-import { DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract.ts'
+import { DISPLAY_NAME, PLUGIN_VERSION, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract.ts'
 import type { OpenDesignConfig } from './config-contract.ts'
 import { listSeedModels } from './catalog.ts'
 import { accountsOf, assertAccounts } from './accounts.ts'
@@ -35,6 +35,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { parseRecoveredProviders, scanSessions } from './session-usage.ts'
 import { readDue } from './quota-cadence.ts'
+import { fetchLatestRelease, pendingUpdate } from './update-check.ts'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
@@ -195,6 +196,25 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     snapshot !== undefined && snapshot.error === undefined && snapshot.windows.length > 0
 
   void refreshIfConfigured()
+
+  // One registry read per start, so the page can say a newer release exists.
+  // DSH has no plugin-wide update action and the desktop profile hides its
+  // package manager, so without this an installed copy has no way to learn that
+  // a fix was published.
+  void (async () => {
+    const release = await fetchLatestRelease()
+    const newer = pendingUpdate(PLUGIN_VERSION, release)
+    if (newer === undefined) return
+    const write = fieldWriterOf(ctx)
+    if (write === undefined) return
+    const payload = {
+      current: PLUGIN_VERSION,
+      latest: newer,
+      ...(release?.homepage === undefined ? {} : { homepage: release.homepage }),
+    }
+    void write('updateJson', JSON.stringify(payload)).catch(() => undefined)
+  })()
+
   /** Configuration inputs that call for a fresh reading. */
   const quotaKey = (config: OpenDesignConfig): string =>
     `${config.useVelaCredential}|${config.sessionRef}|${config.workspaceId}|${config.refreshNonce}`

@@ -23,6 +23,7 @@ import { parseRouteDiagnostics } from '../diagnostics.ts'
 import { QuotaCard } from './QuotaCard.tsx'
 import { BillingCard } from './BillingCard.tsx'
 import { parseBaseline, parsePlanOverrides, planOf } from '../plans.ts'
+import { parseUpdate } from '../update-check.ts'
 import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 import { ModelsCard } from './ModelsCard.tsx'
@@ -125,6 +126,10 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
     [usage?.tier, value?.planOverrides],
   )
   const baseline = useMemo(() => parseBaseline(value?.alignBaselineJson), [value?.alignBaselineJson])
+  // Published release newer than this build, filled by the startup check. Absent
+  // means either up to date or the registry was unreachable; both read the same
+  // way to a user, so no banner appears.
+  const update = useMemo(() => parseUpdate(value?.updateJson), [value?.updateJson])
 
   /**
    * Ask the host for a reading now.
@@ -311,6 +316,28 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
       </div>
 
       <ModelsCard form={form} config={value} editable={editable} />
+
+      {update !== undefined && (
+        <div style={{
+          // Deliberately not an error colour: a newer release is information, and
+          // painting it red would suggest this build is broken.
+          border: '1px solid rgba(77,107,254,0.45)',
+          background: 'rgba(77,107,254,0.08)',
+          borderRadius: '8px',
+          padding: '10px 12px',
+          fontSize: '12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '3px',
+        }}>
+          <div style={{ fontWeight: 500 }}>
+            有新版本 {update.latest}（当前 {update.current}）
+          </div>
+          <div style={{ opacity: 0.7 }}>
+            桌面端插件管理里卸载重装，或执行 dsh plugin --profile web add dsh-opendesign-go@latest
+          </div>
+        </div>
+      )}
 
       <div style={{
         display: 'flex',

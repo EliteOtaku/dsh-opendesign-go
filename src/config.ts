@@ -79,6 +79,7 @@ export const PlainConfig: z<OpenDesignConfig> = z.object({
   recoveredEnabled: z.boolean().default(false),
   recoveredProviders: z.string().default(''),
   refreshNonce: z.string().default(''),
+  updateJson: z.string().default(''),
   baseURL: z.string().default(DEFAULT_BASE_URL),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -115,6 +116,7 @@ export const Config = z.object({
   recoveredEnabled: z.boolean().default(false).volatile(),
   recoveredProviders: z.string().default('').volatile(),
   refreshNonce: z.string().default('').volatile(),
+  updateJson: z.string().default('').volatile(),
   baseURL: z.string().default(DEFAULT_BASE_URL).volatile(),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS).volatile(),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS).volatile(),
@@ -162,6 +164,8 @@ export interface LiveConfig {
   readonly recoveredProviders: { get(): string }
   /** Timestamp of the last manual refresh request. */
   readonly refreshNonce: { get(): string }
+  /** Newest published version, when newer than this build. */
+  readonly updateJson: { get(): string }
   /** Inference base URL, stored as configured. */
   readonly baseURL: { get(): string }
   /** Deadline for one dispatch. */
@@ -194,6 +198,7 @@ export function readConfig(config: LiveConfig): OpenDesignConfig {
     recoveredEnabled: config.recoveredEnabled.get(),
     recoveredProviders: config.recoveredProviders.get(),
     refreshNonce: config.refreshNonce.get(),
+    updateJson: config.updateJson.get(),
     enabledModels: parseEnabledModels(config.enabledModelsJson.get()),
     modelParams: parseModelParams(config.modelParamsJson.get()),
     baseURL: migrateGatewayBaseURL(config.baseURL.get()),

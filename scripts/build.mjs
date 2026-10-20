@@ -95,6 +95,19 @@ if (existsSync(join(root, 'tsconfig.client.json'))) {
   )
 }
 
+// PLUGIN_VERSION is a literal so the bundle can compare versions without
+// filesystem access, which means it can drift from package.json. Checked here
+// rather than trusted: a stale constant would make the update check compare
+// against the wrong build.
+const contractSource = readFileSync(join('src', 'config-contract.ts'), 'utf8')
+const declared = /export const PLUGIN_VERSION = '([^']+)'/.exec(contractSource)?.[1]
+if (declared !== pkg.version) {
+  throw new Error(
+    `PLUGIN_VERSION is ${String(declared)} but package.json is ${pkg.version}; ` +
+    'update src/config-contract.ts so the update check compares the right build',
+  )
+}
+
 writeFileSync(
   join(outDir, 'build-info.json'),
   `${JSON.stringify({ name: pkg.name, version: pkg.version, format: 'esm', entry: 'src/index.ts' }, null, 2)}\n`,

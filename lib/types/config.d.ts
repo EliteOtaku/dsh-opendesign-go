@@ -115,6 +115,10 @@ export interface LiveConfig {
     readonly refreshNonce: {
         get(): string;
     };
+    /** Newest published version, when newer than this build. */
+    readonly updateJson: {
+        get(): string;
+    };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {
         get(): string;
