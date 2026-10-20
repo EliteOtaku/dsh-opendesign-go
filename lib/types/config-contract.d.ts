@@ -136,6 +136,15 @@ export interface OpenDesignConfig {
     readonly recoveredEnabled: boolean;
     /** Provider ids counted by the recovery, comma-separated; empty means default. */
     readonly recoveredProviders: string;
+    /**
+     * Timestamp of the last manual refresh request, epoch milliseconds.
+     *
+     * The page has no direct line to the host's quota reader, and the host already
+     * watches this configuration for changes. Writing a fresh value here is
+     * therefore both the button and its transport: the watcher sees a new value
+     * and reads immediately.
+     */
+    readonly refreshNonce: string;
     /** Parsed enabled-model list, filled by `readConfig`; empty means all. */
     readonly enabledModels?: readonly string[];
     /** Parsed override table, filled by `readConfig`. */

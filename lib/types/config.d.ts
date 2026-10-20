@@ -111,6 +111,10 @@ export interface LiveConfig {
     readonly recoveredProviders: {
         get(): string;
     };
+    /** Timestamp of the last manual refresh request. */
+    readonly refreshNonce: {
+        get(): string;
+    };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {
         get(): string;

@@ -20,9 +20,13 @@ export { barColor, resetCountdown } from './usage-format.ts';
  * @param props - the host reading, or undefined while it is being fetched.
  * @returns the quota card.
  */
-export declare function QuotaCard({ snapshot, loading, ledgerCostUsd }: {
+export declare function QuotaCard({ snapshot, loading, ledgerCostUsd, onRefresh, refreshing }: {
     readonly snapshot: UsageSnapshot | undefined;
     readonly loading: boolean;
     /** What this plugin measured for the same traffic, priced at vendor rates. */
     readonly ledgerCostUsd?: number | undefined;
+    /** Request a reading now; omitted when the page cannot write configuration. */
+    readonly onRefresh?: (() => void) | undefined;
+    /** True while a requested reading has not landed yet. */
+    readonly refreshing?: boolean | undefined;
 }): ReactElement;

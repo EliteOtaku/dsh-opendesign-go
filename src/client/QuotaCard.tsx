@@ -103,11 +103,15 @@ function WindowRow({ window, creditsPerUsd }: {
  * @param props - the host reading, or undefined while it is being fetched.
  * @returns the quota card.
  */
-export function QuotaCard({ snapshot, loading, ledgerCostUsd }: {
+export function QuotaCard({ snapshot, loading, ledgerCostUsd, onRefresh, refreshing }: {
   readonly snapshot: UsageSnapshot | undefined
   readonly loading: boolean
   /** What this plugin measured for the same traffic, priced at vendor rates. */
   readonly ledgerCostUsd?: number | undefined
+  /** Request a reading now; omitted when the page cannot write configuration. */
+  readonly onRefresh?: (() => void) | undefined
+  /** True while a requested reading has not landed yet. */
+  readonly refreshing?: boolean | undefined
 }): ReactElement {
   const card = {
     border: '1px solid rgba(128, 128, 128, 0.25)',
@@ -147,7 +151,33 @@ export function QuotaCard({ snapshot, loading, ledgerCostUsd }: {
     <div style={card}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <div style={{ fontSize: '14px', fontWeight: 500 }}>订阅额度</div>
-        <span style={{ fontSize: '11px', opacity: 0.5 }}>读取于 {new Date(snapshot.asOf).toLocaleTimeString()}</span>
+        <span style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+          <span style={{ fontSize: '11px', opacity: 0.5 }}>
+            读取于 {new Date(snapshot.asOf).toLocaleTimeString()}
+          </span>
+          {onRefresh !== undefined && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing === true}
+              // A read spawns the CLI twice and takes about two seconds, so the
+              // button reports the wait rather than looking unresponsive.
+              title="立即读取一次额度（约需 2 秒）"
+              style={{
+                fontSize: '11px',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                border: '1px solid rgba(128,128,128,0.35)',
+                background: 'transparent',
+                color: 'inherit',
+                cursor: refreshing === true ? 'default' : 'pointer',
+                opacity: refreshing === true ? 0.5 : 0.8,
+              }}
+            >
+              {refreshing === true ? '读取中…' : '刷新'}
+            </button>
+          )}
+        </span>
       </div>
       {snapshot.windows.map((window) => (
         <WindowRow key={window.durationSeconds} window={window} creditsPerUsd={snapshot.creditsPerUsd} />

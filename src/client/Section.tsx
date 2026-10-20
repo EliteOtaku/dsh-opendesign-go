@@ -12,7 +12,7 @@
  *
  * @module dsh-opendesign-go/client/Section
  */
-import { useMemo, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { PROFILE_ENTRY_ID } from '../config-contract.ts'
@@ -127,6 +127,36 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   const baseline = useMemo(() => parseBaseline(value?.alignBaselineJson), [value?.alignBaselineJson])
 
   /**
+   * Ask the host for a reading now.
+   *
+   * The page has no direct line to the quota reader, but the host already watches
+   * this configuration for changes, so writing a fresh nonce both expresses the
+   * request and carries it. `refreshing` is cleared when the reading's timestamp
+   * moves past the moment the button was pressed — not on the write resolving,
+   * because the write succeeds long before the CLI answers.
+   */
+  const [refreshingSince, setRefreshingSince] = useState<number | undefined>(undefined)
+  const refreshQuota = (): void => {
+    const at = Date.now()
+    setRefreshingSince(at)
+    void form.mutate([{ op: 'set', path: ['refreshNonce'], value: String(at) }])
+      .catch((error: unknown) => {
+        setRefreshingSince(undefined)
+        console.error('llm-opendesign-go: could not request a quota refresh', error)
+      })
+  }
+  const usageAt = usage === undefined ? undefined : Date.parse(usage.asOf)
+  const refreshing = refreshingSince !== undefined
+    && (usageAt === undefined || usageAt < refreshingSince)
+  useEffect(() => {
+    // A read that never lands would leave the button stuck on "读取中…", so the
+    // wait is bounded: the request is one CLI call, not a state to hold forever.
+    if (!refreshing) return undefined
+    const timer = setTimeout(() => { setRefreshingSince(undefined) }, 15_000)
+    return () => { clearTimeout(timer) }
+  }, [refreshing])
+
+  /**
    * Record the current credits reading as the zero point.
    *
    * Plan credits accumulate over the window and include traffic this plugin
@@ -220,7 +250,13 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
 
       <UsageCard report={report} />
 
-      <QuotaCard snapshot={usage} loading={false} ledgerCostUsd={report?.costUsd} />
+      <QuotaCard
+        snapshot={usage}
+        loading={false}
+        ledgerCostUsd={report?.costUsd}
+        onRefresh={editable ? refreshQuota : undefined}
+        refreshing={refreshing}
+      />
 
       <BillingCard
         snapshot={usage}

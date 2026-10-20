@@ -46,8 +46,13 @@ const MAX_USAGE_RETRIES = 6
 /** How often a configuration change is noticed, in milliseconds. */
 const FAST_WATCH_MS = 300
 
-/** Steady-state quota read interval, in milliseconds. */
-const SLOW_POLL_MS = 5_000
+/** Steady-state quota read interval, in milliseconds.
+ *
+ * A read spawns the OpenDesign CLI twice and costs about 2.1s of wall time, so a
+ * five-second cadence would keep a process running roughly 43% of the day for a
+ * number nobody watches. The manual refresh covers the moment the user does care.
+ */
+const SLOW_POLL_MS = 60_000
 
 /** Local usage report window: the trailing 30 days. */
 const REPORT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
@@ -190,12 +195,15 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     snapshot !== undefined && snapshot.error === undefined && snapshot.windows.length > 0
 
   void refreshIfConfigured()
-  let lastUsageKey = `${current().useVelaCredential}|${current().sessionRef}|${current().workspaceId}`
+  /** Configuration inputs that call for a fresh reading. */
+  const quotaKey = (config: OpenDesignConfig): string =>
+    `${config.useVelaCredential}|${config.sessionRef}|${config.workspaceId}|${config.refreshNonce}`
+  let lastUsageKey = quotaKey(current())
   let retries = 0
   /** Read once, recording whether the result was usable. */
   const tick = (force: boolean): void => {
     const config = current()
-    const key = `${config.useVelaCredential}|${config.sessionRef}|${config.workspaceId}`
+    const key = quotaKey(config)
     const changed = key !== lastUsageKey
     if (changed) {
       lastUsageKey = key
@@ -228,8 +236,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     }
     const watch = setInterval(() => {
       const config = current()
-      const key = `${config.useVelaCredential}|${config.sessionRef}|${config.workspaceId}`
-      if (key === lastUsageKey) return
+      if (quotaKey(config) === lastUsageKey) return
       // A change is the user waiting on a result: read now rather than at the
       // next scheduled tick.
       if (timer !== undefined) {
