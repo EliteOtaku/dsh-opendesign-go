@@ -13,6 +13,7 @@
  */
 import type { ModelModality } from '@deepseek-ai/dsh-llm'
 import { PROVIDER_ID } from './config-contract.ts'
+import { MODEL_DEFAULTS } from './model-params.ts'
 
 /** One advertised model row. */
 export interface CatalogModel {
@@ -27,13 +28,17 @@ export interface CatalogModel {
 /**
  * The Design Plan models a Go subscription grants, in display order.
  *
- * Names mirror the OpenDesign pricing table. Modalities are declared only where
- * the model id states them; everything else stays unknown rather than guessed.
+ * Names mirror the OpenDesign pricing table. A model's accepted modalities are
+ * not declared here: `MODEL_DEFAULTS` in `model-params.ts` is the single source
+ * for them, taken from each vendor's documentation. Keeping a second copy here
+ * is what let this file claim image support for one model while the adapter,
+ * reading the other table, allowed it for nine — a picker that hid a capability
+ * the request path already accepted.
  */
 export const GO_DESIGN_PLAN_MODELS: readonly CatalogModel[] = [
   { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
-  { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', inputModalities: ['text', 'image'] },
+  { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp' },
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
   { id: 'claude-haiku-5.5', name: 'Claude Haiku 5.5' },
   { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
@@ -65,12 +70,17 @@ export function listSeedModels(provider: string): readonly {
   name: string
   inputModalities?: readonly ModelModality[]
 }[] {
-  return GO_DESIGN_PLAN_MODELS.map((model) => ({
-    provider,
-    id: model.id,
-    name: model.name,
-    ...(model.inputModalities === undefined ? {} : { inputModalities: model.inputModalities }),
-  }))
+  // Modalities come from MODEL_DEFAULTS, the one table with vendor-sourced
+  // values, so this projection cannot disagree with the request gate.
+  return GO_DESIGN_PLAN_MODELS.map((model) => {
+    const modalities = MODEL_DEFAULTS[model.id]?.inputModalities
+    return {
+      provider,
+      id: model.id,
+      name: model.name,
+      ...(modalities === undefined ? {} : { inputModalities: modalities }),
+    }
+  })
 }
 
 /** Route this catalog belongs to. */

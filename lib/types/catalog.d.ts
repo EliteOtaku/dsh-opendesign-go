@@ -25,8 +25,12 @@ export interface CatalogModel {
 /**
  * The Design Plan models a Go subscription grants, in display order.
  *
- * Names mirror the OpenDesign pricing table. Modalities are declared only where
- * the model id states them; everything else stays unknown rather than guessed.
+ * Names mirror the OpenDesign pricing table. A model's accepted modalities are
+ * not declared here: `MODEL_DEFAULTS` in `model-params.ts` is the single source
+ * for them, taken from each vendor's documentation. Keeping a second copy here
+ * is what let this file claim image support for one model while the adapter,
+ * reading the other table, allowed it for nine — a picker that hid a capability
+ * the request path already accepted.
  */
 export declare const GO_DESIGN_PLAN_MODELS: readonly CatalogModel[];
 /**
