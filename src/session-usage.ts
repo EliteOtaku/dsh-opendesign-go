@@ -35,18 +35,54 @@ export interface RecoveredCall {
   readonly cacheReadTokens: number
   /** Cache-write tokens, when recorded. */
   readonly cacheWriteTokens: number
+  /**
+   * Event time in epoch milliseconds, from the event's top-level `time`.
+   *
+   * Carried so recovered spend can be placed in the same time windows as the
+   * live ledger; without it the two sources could only be compared as totals.
+   */
+  readonly at: number
 }
 
 /**
- * Provider ids treated as this subscription.
+ * Provider ids treated as this subscription by default.
  *
  * `opendesign` is the hand-configured custom-model route; `dsh-opendesign-go` is
- * this plugin. Both bill the same subscription, so both are counted.
+ * this plugin. Both bill the same subscription, so both are counted. A user who
+ * renamed or duplicated the route can extend this through configuration, which
+ * is why it is a list rather than a hard-coded set.
  */
-const OPEN_DESIGN_PROVIDERS = new Set(['opendesign', 'dsh-opendesign-go'])
+export const DEFAULT_RECOVERED_PROVIDERS: readonly string[] = ['opendesign', 'dsh-opendesign-go']
+
+/** Options for {@link scanSessions}. */
+export interface ScanOptions {
+  /** Only count calls at or after this epoch-ms instant; omitted means no bound. */
+  readonly since?: number | undefined
+  /** Provider ids to count; omitted means {@link DEFAULT_RECOVERED_PROVIDERS}. */
+  readonly providers?: readonly string[] | undefined
+}
 
 /** Zstandard frame magic, used to walk a concatenated multi-frame log. */
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+
+/**
+ * Parse a configured provider list.
+ *
+ * Configuration reaches this as one string, so the separator is fixed here.
+ * Blank items are dropped because a trailing comma in a settings field is an
+ * ordinary typo, and an empty result falls back to the defaults so that clearing
+ * the field restores the standard routes instead of silently counting nothing.
+ * @param raw - comma-separated provider ids, as stored in settings.
+ * @returns the configured ids, or the default list when nothing usable was given.
+ */
+export function parseRecoveredProviders(raw: string | undefined): readonly string[] {
+  if (raw === undefined) return DEFAULT_RECOVERED_PROVIDERS
+  const providers = raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+  return providers.length === 0 ? DEFAULT_RECOVERED_PROVIDERS : providers
+}
 
 /**
  * Decompress every frame of one session log.
@@ -87,16 +123,22 @@ export function readSessionLog(path: string): string | undefined {
  * event type is skipped; a line that does not parse at all is skipped too,
  * because a partially written tail must not discard the whole log.
  * @param text - decoded session JSONL.
+ * @param providers - provider ids to count; omitted means the default list.
  * @returns the recovered calls, in log order.
  */
-export function callsFromSessionText(text: string): RecoveredCall[] {
+export function callsFromSessionText(
+  text: string,
+  providers: readonly string[] = DEFAULT_RECOVERED_PROVIDERS,
+): RecoveredCall[] {
+  const wanted = providerSetOf(providers)
+  const needles = providers.filter((provider) => provider.length > 0)
   const calls: RecoveredCall[] = []
   for (const line of text.split('\n')) {
     if (line.length === 0) continue
     // Cheap rejects first: parsing every line of a large log is the expensive
     // part, and most lines are neither the right type nor this provider.
     if (!line.includes('"assistant/message"')) continue
-    if (!line.includes('opendesign')) continue
+    if (!needles.some((needle) => line.includes(needle))) continue
     let row: unknown
     try {
       row = JSON.parse(line)
@@ -104,18 +146,36 @@ export function callsFromSessionText(text: string): RecoveredCall[] {
       continue
     }
     if (row === null || typeof row !== 'object') continue
-    const call = callOf(row as Record<string, unknown>)
+    const call = callOf(row as Record<string, unknown>, wanted)
     if (call !== undefined) calls.push(call)
   }
   return calls
 }
 
 /**
+ * Build the membership test for one scan.
+ *
+ * Blank entries are dropped so that an explicit empty list counts nothing
+ * instead of matching every event through an empty-string hit.
+ * @param providers - provider ids to count.
+ * @returns the ids as a set, for exact comparison.
+ */
+function providerSetOf(providers: readonly string[]): ReadonlySet<string> {
+  return new Set(providers.filter((provider) => provider.length > 0))
+}
+
+/**
  * Read one event as a recovered call.
  * @param row - parsed session event.
+ * @param providers - provider ids this scan counts.
  * @returns the call, or undefined when this event is not a billable one.
  */
-function callOf(row: Record<string, unknown>): RecoveredCall | undefined {
+function callOf(row: Record<string, unknown>, providers: ReadonlySet<string>): RecoveredCall | undefined {
+  // A call without a usable timestamp cannot be placed in a billing window, and
+  // a NaN would poison every downstream sum, so such an event is dropped rather
+  // than defaulted to "now" — that would invent billable spend at read time.
+  const at = row.time
+  if (typeof at !== 'number' || !Number.isFinite(at) || at < 0) return undefined
   // An `assistant/message` event nests the route under `data.message.source`
   // and the tokens under `data.usage`; the provider is not a top-level field,
   // which is why a flat read finds nothing.
@@ -129,7 +189,7 @@ function callOf(row: Record<string, unknown>): RecoveredCall | undefined {
   const src = source as Record<string, unknown>
   const provider = src.provider
   const model = src.model
-  if (typeof provider !== 'string' || !OPEN_DESIGN_PROVIDERS.has(provider)) return undefined
+  if (typeof provider !== 'string' || !providers.has(provider)) return undefined
   if (typeof model !== 'string' || model.length === 0) return undefined
   const usage = d.usage
   if (usage === null || typeof usage !== 'object') return undefined
@@ -142,6 +202,7 @@ function callOf(row: Record<string, unknown>): RecoveredCall | undefined {
     outputTokens: num(u.outputTokens),
     cacheReadTokens: num(u.cacheReadTokens),
     cacheWriteTokens: num(u.cacheWriteTokens),
+    at,
   }
 }
 
@@ -152,10 +213,14 @@ function callOf(row: Record<string, unknown>): RecoveredCall | undefined {
  * is two levels deep by design rather than recursive: a deeper search would
  * touch unrelated trees.
  * @param root - absolute `~/.dsh/sessions` directory.
- * @returns every recovered call.
+ * @param options - time bound and provider list; omitted means no bound and the
+ *   default providers.
+ * @returns every matching recovered call.
  */
-export function scanSessions(root: string): RecoveredCall[] {
+export function scanSessions(root: string, options?: ScanOptions): RecoveredCall[] {
   if (!existsSync(root)) return []
+  const providers = options?.providers ?? DEFAULT_RECOVERED_PROVIDERS
+  const since = options?.since
   const calls: RecoveredCall[] = []
   let workspaces: string[]
   try {
@@ -181,7 +246,12 @@ export function scanSessions(root: string): RecoveredCall[] {
       if (!existsSync(logPath)) continue
       const text = readSessionLog(logPath)
       if (text === undefined) continue
-      calls.push(...callsFromSessionText(text))
+      for (const call of callsFromSessionText(text, providers)) {
+        // Inclusive so a window that starts exactly at a recorded call keeps it,
+        // matching how the live ledger bounds its own windows.
+        if (since !== undefined && call.at < since) continue
+        calls.push(call)
+      }
     }
   }
   return calls

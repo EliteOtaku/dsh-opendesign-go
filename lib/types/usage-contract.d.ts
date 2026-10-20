@@ -9,6 +9,7 @@
  * @module dsh-opendesign-go/usage-contract
  */
 import type { UsageReport } from './usage-ledger.ts';
+export { windowLabel } from './client/usage-format.ts';
 /** How one quota window stands right now. */
 export interface QuotaWindow {
     /** `ok` when the console answered; `unknown` when it could not be read. */
@@ -57,16 +58,6 @@ export interface UsageSnapshot {
     /** Set when the quota channel is configured but the last read failed. */
     readonly error?: string;
 }
-/**
- * Human label for a window length.
- *
- * Derived from `durationSeconds` rather than stored, so a plan that changes its
- * windows is described correctly without a code change. An unrecognised length
- * still renders something truthful.
- * @param durationSeconds - window length from the console.
- * @returns a short label such as `5 小时`.
- */
-export declare function windowLabel(durationSeconds: number): string;
 /**
  * Parse a decimal credits string without losing precision or inventing a value.
  * @param value - decimal string from the console.

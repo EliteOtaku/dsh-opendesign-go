@@ -10,6 +10,12 @@
  */
 import type { ModelTotals, UsageReport } from './usage-ledger.ts'
 
+// The label is shared with the page's billing view, which renders the same
+// windows; keeping one implementation keeps both panels describing a window
+// identically. Re-exported here so every existing host and page import path
+// stays valid.
+export { windowLabel } from './client/usage-format.ts'
+
 /** How one quota window stands right now. */
 export interface QuotaWindow {
   /** `ok` when the console answered; `unknown` when it could not be read. */
@@ -59,24 +65,6 @@ export interface UsageSnapshot {
   readonly creditsPerUsd?: number
   /** Set when the quota channel is configured but the last read failed. */
   readonly error?: string
-}
-
-/**
- * Human label for a window length.
- *
- * Derived from `durationSeconds` rather than stored, so a plan that changes its
- * windows is described correctly without a code change. An unrecognised length
- * still renders something truthful.
- * @param durationSeconds - window length from the console.
- * @returns a short label such as `5 小时`.
- */
-export function windowLabel(durationSeconds: number): string {
-  // Largest whole unit first: 604800 s is "7 天", not "168 小时".
-  const days = durationSeconds / 86400
-  if (Number.isInteger(days) && days >= 1) return `${days} 天`
-  const hours = durationSeconds / 3600
-  if (Number.isInteger(hours) && hours >= 1) return `${hours} 小时`
-  return `${Math.round(durationSeconds / 60)} 分钟`
 }
 
 /**

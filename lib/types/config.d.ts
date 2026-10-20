@@ -95,6 +95,22 @@ export interface LiveConfig {
     readonly enabledModelsJson: {
         get(): string;
     };
+    /** Per-tier monthly cap overrides. */
+    readonly planOverrides: {
+        get(): string;
+    };
+    /** Alignment baseline, serialized. */
+    readonly alignBaselineJson: {
+        get(): string;
+    };
+    /** Whether session-log recovery runs. */
+    readonly recoveredEnabled: {
+        get(): boolean;
+    };
+    /** Provider ids counted by the recovery. */
+    readonly recoveredProviders: {
+        get(): string;
+    };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {
         get(): string;

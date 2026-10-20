@@ -33,7 +33,7 @@ import { readVelaUsage } from './vela-billing.ts'
 import type { RouteDiagnostics } from './diagnostics.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
-import { scanSessions } from './session-usage.ts'
+import { parseRecoveredProviders, scanSessions } from './session-usage.ts'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
@@ -223,14 +223,27 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * while the process runs — new calls are metered live — so one pass is enough.
    */
   let recoveredCache: { calls: number, costUsd: number, unpricedCalls: number, cacheReadTokens: number } | undefined
+  let recoveredKey = ''
   const recoveredSpend = (): typeof recoveredCache => {
-    if (recoveredCache !== undefined) return recoveredCache
+    // Off by default: the scan reads every session on the machine, so its total
+    // includes traffic from other agents sharing the key and other workspaces.
+    const config = current()
+    if (!config.recoveredEnabled) return undefined
+    // Re-scan when the provider list changes, since the cached total was
+    // computed against the previous one.
+    const key = config.recoveredProviders
+    if (recoveredCache !== undefined && key === recoveredKey) return recoveredCache
     let calls = 0
     let costUsd = 0
     let unpricedCalls = 0
     let cacheReadTokens = 0
     try {
-      for (const call of scanSessions(join(resolveDshHome(), 'sessions'))) {
+      const since = Date.now() - REPORT_WINDOW_MS
+      const scan = {
+        since,
+        providers: parseRecoveredProviders(config.recoveredProviders),
+      }
+      for (const call of scanSessions(join(resolveDshHome(), 'sessions'), scan)) {
         const price = priceOf(call.model)
         if (price === undefined) {
           unpricedCalls += 1
@@ -249,6 +262,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     // Only cache a real result: caching an empty scan would hide history that a
     // later fix could recover.
     recoveredCache = { calls, costUsd, unpricedCalls, cacheReadTokens }
+    recoveredKey = key
     return recoveredCache
   }
 

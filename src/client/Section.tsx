@@ -21,6 +21,8 @@ import type { UsageSnapshot } from '../usage-contract.ts'
 import { parseReport, parseUsage } from '../usage-contract.ts'
 import { parseRouteDiagnostics } from '../diagnostics.ts'
 import { QuotaCard } from './QuotaCard.tsx'
+import { BillingCard } from './BillingCard.tsx'
+import { parseBaseline, parsePlanOverrides, planOf } from '../plans.ts'
 import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 import { ModelsCard } from './ModelsCard.tsx'
@@ -115,6 +117,39 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   // console session and is the primary usage surface.
   const report = useMemo(() => parseReport(value?.reportJson), [value?.reportJson])
   const routeState = useMemo(() => parseRouteDiagnostics(value?.diagnosticsJson), [value?.diagnosticsJson])
+  // Plan row: the advertised allowance is a default, so an operator override
+  // wins. `plan` stays undefined for a tier this build does not know, and the
+  // billing card then omits that row rather than inventing a cap.
+  const plan = useMemo(
+    () => (usage === undefined ? undefined : planOf(usage.tier, parsePlanOverrides(value?.planOverrides))),
+    [usage?.tier, value?.planOverrides],
+  )
+  const baseline = useMemo(() => parseBaseline(value?.alignBaselineJson), [value?.alignBaselineJson])
+
+  /**
+   * Record the current credits reading as the zero point.
+   *
+   * Plan credits accumulate over the window and include traffic this plugin
+   * never saw, so only an increment measured from a shared instant is
+   * comparable with the plugin's own total.
+   */
+  const align = (): void => {
+    if (usage === undefined) return
+    const widest = usage.windows.reduce<typeof usage.windows[number] | undefined>(
+      (best, window) => (best === undefined || window.durationSeconds > best.durationSeconds ? window : best),
+      undefined,
+    )
+    if (widest === undefined) return
+    const credits = Number(widest.usedCredits)
+    if (!Number.isFinite(credits)) return
+    const payload = {
+      at: Date.now(),
+      credits,
+      measuredUsd: report?.costUsd ?? 0,
+    }
+    void form.mutate([{ op: 'set', path: ['alignBaselineJson'], value: JSON.stringify(payload) }])
+      .catch((error: unknown) => { console.error('llm-opendesign-go: could not save the baseline', error) })
+  }
 
   /**
    * Flip the route switch. A refusal is surfaced instead of swallowed: the
@@ -186,6 +221,15 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
       <UsageCard report={report} />
 
       <QuotaCard snapshot={usage} loading={false} ledgerCostUsd={report?.costUsd} />
+
+      <BillingCard
+        snapshot={usage}
+        plan={plan}
+        measuredUsd={report?.costUsd}
+        baseline={baseline}
+        onAlign={usage === undefined ? undefined : align}
+        editable={editable}
+      />
 
       <div style={cardStyle}>
         <div style={{ fontSize: '14px', fontWeight: 500 }}>额度来源</div>

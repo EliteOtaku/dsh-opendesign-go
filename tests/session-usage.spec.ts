@@ -3,11 +3,38 @@ import { zstdCompressSync } from 'node:zlib'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { callsFromSessionText, readSessionLog, scanSessions } from '../src/session-usage.ts'
+import {
+  DEFAULT_RECOVERED_PROVIDERS,
+  callsFromSessionText,
+  parseRecoveredProviders,
+  readSessionLog,
+  scanSessions,
+} from '../src/session-usage.ts'
 
-/** One `assistant/message` event in the shape the harness writes. */
-function messageEvent(provider: string, model: string, usage: Record<string, number>): string {
-  return JSON.stringify({
+/** A fixed instant so assertions on `at` stay readable. */
+const T0 = 1_700_000_000_000
+
+/**
+ * Sentinel for "the event has no `time` field at all".
+ *
+ * A plain `undefined` default would be silently replaced by the default value,
+ * so the field has to be removed explicitly to model the case under test.
+ */
+const NO_TIME = Symbol('no-time')
+
+/**
+ * One `assistant/message` event in the shape the harness writes.
+ *
+ * `time` is a parameter rather than a literal so a test can build the malformed
+ * events the reader has to survive without hand-writing JSON strings.
+ */
+function messageEvent(
+  provider: string,
+  model: string,
+  usage: Record<string, number>,
+  time: unknown = T0,
+): string {
+  const event: Record<string, unknown> = {
     type: 'assistant/message',
     seq: 1,
     data: {
@@ -16,7 +43,17 @@ function messageEvent(provider: string, model: string, usage: Record<string, num
       message: { role: 'assistant', content: [], source: { kind: 'model', provider, model } },
       usage,
     },
-  })
+  }
+  if (time !== NO_TIME) event.time = time
+  return JSON.stringify(event)
+}
+
+/** Write one session log made of one frame per line. */
+function writeLog(root: string, workspace: string, session: string, lines: readonly string[]): void {
+  const dir = join(root, workspace, session)
+  mkdirSync(dir, { recursive: true })
+  const frames = lines.map((line) => zstdCompressSync(Buffer.from(`${line}\n`, 'utf8')))
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), Buffer.concat(frames))
 }
 
 describe('callsFromSessionText', () => {
@@ -35,6 +72,7 @@ describe('callsFromSessionText', () => {
       outputTokens: 20,
       cacheReadTokens: 50,
       cacheWriteTokens: 0,
+      at: T0,
     })
   })
 
@@ -69,6 +107,42 @@ describe('callsFromSessionText', () => {
   it('treats a missing usage field as zero rather than NaN', () => {
     const text = messageEvent('opendesign', 'deepseek-v4.1-flash', {})
     expect(callsFromSessionText(text)[0]?.inputTokens).toBe(0)
+  })
+
+  it('records the event time as epoch milliseconds', () => {
+    const text = messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 1 }, 1_600_000_000_123)
+    expect(callsFromSessionText(text)[0]?.at).toBe(1_600_000_000_123)
+  })
+
+  it('skips events with a missing or unusable time', () => {
+    // A call with no timestamp cannot be placed in a window, and a NaN would
+    // poison any later sum, so the event is dropped instead of guessed at.
+    const good = messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 3 }, T0)
+    const text = [
+      messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 1 }, NO_TIME),
+      messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 2 }, 'not-a-number'),
+      messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 9 }, Number.NaN),
+      good,
+    ].join('\n')
+    const calls = callsFromSessionText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.inputTokens).toBe(3)
+    expect(calls.every((call) => Number.isFinite(call.at))).toBe(true)
+  })
+
+  it('honours a custom provider list', () => {
+    const text = [
+      messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 1 }),
+      messageEvent('my-mirror', 'deepseek-v4.1-flash', { inputTokens: 2 }),
+    ].join('\n')
+    const calls = callsFromSessionText(text, ['my-mirror'])
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.provider).toBe('my-mirror')
+  })
+
+  it('falls back to the default list when no provider list is given', () => {
+    const text = messageEvent('dsh-opendesign-go', 'deepseek-v4.1-flash', { inputTokens: 4 })
+    expect(callsFromSessionText(text, DEFAULT_RECOVERED_PROVIDERS)).toHaveLength(1)
   })
 })
 
@@ -114,6 +188,7 @@ describe('scanSessions', () => {
       const calls = scanSessions(root)
       expect(calls).toHaveLength(1)
       expect(calls[0]?.inputTokens).toBe(42)
+      expect(calls[0]?.at).toBe(T0)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -121,5 +196,79 @@ describe('scanSessions', () => {
 
   it('returns an empty list when the root is absent', () => {
     expect(scanSessions(join(tmpdir(), 'od-no-sessions-here'))).toEqual([])
+  })
+
+  it('keeps only calls at or after the since instant', () => {
+    const root = mkdtempSync(join(tmpdir(), 'od-since-'))
+    try {
+      writeLog(root, '--ws--', 's1', [
+        messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 1 }, T0 - 1_000),
+        messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 2 }, T0),
+        messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 3 }, T0 + 1_000),
+      ])
+      // The bound is inclusive so a call recorded exactly at the window start is
+      // kept, matching how the live ledger bounds its own windows.
+      const calls = scanSessions(root, { since: T0 })
+      expect(calls.map((call) => call.inputTokens)).toEqual([2, 3])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('counts only the configured providers', () => {
+    const root = mkdtempSync(join(tmpdir(), 'od-providers-'))
+    try {
+      writeLog(root, '--ws--', 's1', [
+        messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 1 }),
+        messageEvent('my-mirror', 'deepseek-v4.1-flash', { inputTokens: 2 }),
+        messageEvent('my-mirror', 'deepseek-v4.1-flash', { inputTokens: 3 }),
+      ])
+      const calls = scanSessions(root, { providers: ['my-mirror'] })
+      expect(calls).toHaveLength(2)
+      expect(calls.map((call) => call.provider)).toEqual(['my-mirror', 'my-mirror'])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('drops timed-out events while walking logs', () => {
+    const root = mkdtempSync(join(tmpdir(), 'od-notime-'))
+    try {
+      writeLog(root, '--ws--', 's1', [
+        messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 1 }, NO_TIME),
+        messageEvent('opendesign', 'deepseek-v4.1-flash', { inputTokens: 2 }, T0),
+      ])
+      const calls = scanSessions(root)
+      expect(calls).toHaveLength(1)
+      expect(Number.isNaN(calls[0]?.at)).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('parseRecoveredProviders', () => {
+  it('returns the built-in routes when nothing is configured', () => {
+    expect(parseRecoveredProviders(undefined)).toEqual(DEFAULT_RECOVERED_PROVIDERS)
+    expect(parseRecoveredProviders('')).toEqual(DEFAULT_RECOVERED_PROVIDERS)
+  })
+
+  it('falls back to the defaults when the value carries no usable entry', () => {
+    // A field of only separators must restore the standard routes, not silently
+    // count nothing — an empty list would look like "no spend", not "unset".
+    expect(parseRecoveredProviders('   ')).toEqual(DEFAULT_RECOVERED_PROVIDERS)
+    expect(parseRecoveredProviders(' , ,, ')).toEqual(DEFAULT_RECOVERED_PROVIDERS)
+  })
+
+  it('splits on commas and trims every entry', () => {
+    expect(parseRecoveredProviders(' opendesign , my-mirror ')).toEqual(['opendesign', 'my-mirror'])
+  })
+
+  it('ignores blank entries left by stray separators', () => {
+    expect(parseRecoveredProviders('a,, b ,')).toEqual(['a', 'b'])
+  })
+
+  it('keeps a single configured provider', () => {
+    expect(parseRecoveredProviders('my-mirror')).toEqual(['my-mirror'])
   })
 })

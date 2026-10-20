@@ -118,6 +118,33 @@ export interface OpenDesignConfig {
    * the picker, so hiding one must not require editing the composition.
    */
   readonly enabledModelsJson: string
+  /**
+   * Per-tier monthly allowance overrides, format `go:150,plus:200`.
+   *
+   * A reseller or a promotion can give a cap the pricing page never states, so
+   * the advertised table is a default rather than the truth.
+   */
+  readonly planOverrides: string
+  /**
+   * Alignment baseline, serialized as JSON.
+   *
+   * Plan credits are cumulative for the window, while this plugin only sees the
+   * traffic it served. Subtracting a baseline taken at a chosen moment is the
+   * only way to compare increments, which are the one quantity both sources
+   * measure over the same interval.
+   */
+  readonly alignBaselineJson: string
+  /**
+   * Whether to recover spend from session logs this adapter never served.
+   *
+   * Off by default. The recovery reads every session on the machine, so it
+   * includes traffic from other agents sharing the key (undercounting the true
+   * total) and other workspaces (overcounting this one) — the direction of the
+   * error is unknown, which makes an opt-in the honest default.
+   */
+  readonly recoveredEnabled: boolean
+  /** Provider ids counted by the recovery, comma-separated; empty means default. */
+  readonly recoveredProviders: string
   /** Parsed enabled-model list, filled by `readConfig`; empty means all. */
   readonly enabledModels?: readonly string[]
   /** Parsed override table, filled by `readConfig`. */
