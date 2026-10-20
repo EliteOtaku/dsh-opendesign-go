@@ -22,9 +22,23 @@
 
 这是 DSH 插件，需要 DSH 桌面端 `>= 0.2.0-rc.1`（见 `package.json` 的 `engines`）。
 
-**通过 DSH 桌面端的插件管理界面安装**，安装后重启桌面端，在设置里打开「OpenDesign Go」分区。
+**从 GitHub 直接安装**，在 DSH 桌面端的插件管理界面里填：
 
-> 桌面端的 `desktop` profile 由 Electron 应用独占管理：依赖和 `dsh.profile.bundles` 条目是分开落地的，命令行 `dsh plugin add` 只写其中一部分，结果通常是一半安装（启动报 `cannot resolve profile bundle`，或者插件静默不加载）。所以不要用 `dsh plugin add` 装到 desktop profile。
+```
+github:EliteOtaku/dsh-opendesign-go
+```
+
+装完重启桌面端，在设置里打开「OpenDesign Go」分区。
+
+构建产物 `lib/` 已提交到仓库，所以 GitHub 安装不需要在本机构建。这一点是刻意的：装包时不能假设用户有构建环境。
+
+**非桌面端 profile**（例如 `web`）也可以用命令行：
+
+```bash
+dsh plugin --profile web add github:EliteOtaku/dsh-opendesign-go
+```
+
+> 桌面端的 `desktop` profile 由 Electron 应用独占管理：依赖和 `dsh.profile.bundles` 条目是分开落地的，命令行 `dsh plugin add` 只写其中一部分，结果通常是一半安装（启动报 `cannot resolve profile bundle`，或者插件静默不加载）。所以 desktop profile 请用插件管理界面，不要用命令行。
 
 ## 配置
 
