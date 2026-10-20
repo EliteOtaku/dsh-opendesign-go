@@ -2,6 +2,17 @@
 
 在 DSH 里使用 OpenDesign Go 订阅的 12 个模型：推理走 OpenAI Chat Completions 协议，额度、用量和多账号都在设置页里。
 
+## 关于作者
+
+交易员，业余写工具。这个插件起源于我自己拿 DeepSeek 做量化策略研究和复盘时的需要。
+
+| 平台 | 地址 |
+| --- | --- |
+| 知乎 | [勇者别嚣张](https://www.zhihu.com/people/yong-zhe-bie-xiao-zhang) |
+| YouTube | [@valortrader](https://www.youtube.com/@valortrader) |
+| B站 | [勇者别嚣张的交易室](https://space.bilibili.com/10323235) |
+| 微信公众号 | 勇者别嚣张的交易室 |
+
 ## 功能
 
 | 功能 | 说明 |
