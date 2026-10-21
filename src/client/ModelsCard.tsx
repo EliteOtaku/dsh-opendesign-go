@@ -28,6 +28,7 @@ import {
   parseEnabledModels,
   parseModelParams,
 } from '../model-params.ts'
+import { usableInputTokens } from '../output-budget.ts'
 
 const card = {
   border: '1px solid rgba(128, 128, 128, 0.25)',
@@ -176,8 +177,11 @@ export function ModelsCard({ form, config, editable }: {
       </div>
       <p style={hint}>
         取消勾选后该模型不再出现在会话的模型选择器里，但仍可用 API 直接调用。
-        参数默认值取自 OpenDesign 的 <code style={{ margin: '0 3px' }}>/v1/models</code>，
-        与厂商公布的模型规格可能不同（网关会再限一层），留空即沿用网关值。
+        参数默认值取自各厂商公布的模型规格，留空即沿用。
+      </p>
+      <p style={hint}>
+        可用输入 = 上下文 − max(输出上限, 上下文/4)。网关按「输入 + max_tokens ≤ 上下文」判超限，
+        而会话界面只量输入，把这个差额算进去才不会在长对话里突然被拒。
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -216,6 +220,9 @@ export function ModelsCard({ form, config, editable }: {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
                   <span style={{ fontSize: '11px', opacity: 0.7, fontVariantNumeric: 'tabular-nums' }}>
                     上下文 {context === undefined ? '未知' : tokens(context)}
+                    {context !== undefined && max !== undefined
+                      ? `（可用输入 ${tokens(usableInputTokens(context, max))}）`
+                      : ''}
                     {' · '}输出 {max === undefined ? '未知' : tokens(max)}
                     {override !== undefined && <span style={{ marginLeft: '4px', opacity: 0.8 }}>（已改）</span>}
                   </span>
