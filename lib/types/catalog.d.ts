@@ -19,18 +19,15 @@ export interface CatalogModel {
     readonly id: string;
     /** Human-readable name for selectors. */
     readonly name: string;
-    /** Accepted request modalities; absent means unknown. */
-    readonly inputModalities?: readonly ModelModality[];
 }
 /**
  * The Design Plan models a Go subscription grants, in display order.
  *
  * Names mirror the OpenDesign pricing table. A model's accepted modalities are
- * not declared here: `MODEL_DEFAULTS` in `model-params.ts` is the single source
- * for them, taken from each vendor's documentation. Keeping a second copy here
- * is what let this file claim image support for one model while the adapter,
- * reading the other table, allowed it for nine — a picker that hid a capability
- * the request path already accepted.
+ * deliberately not declared here: `MODEL_DEFAULTS` in `model-params.ts` is the
+ * single source for them, taken from each vendor's documentation. A second copy
+ * in this table once made the picker and the request path disagree about which
+ * models accept images.
  */
 export declare const GO_DESIGN_PLAN_MODELS: readonly CatalogModel[];
 /**
