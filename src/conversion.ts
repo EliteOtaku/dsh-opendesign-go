@@ -206,9 +206,14 @@ function toChatMessage(
     case 'assistant':
       return assistantMessage(message.content, resolveImage)
     case 'tool': {
-      const text = partsOf(message.content, undefined).text
+      // A tool result may carry an image: `read_image` answers with the bytes it
+      // read, and that reply is a tool message. The gateway accepts image parts
+      // on the `tool` role as long as the request also declares `tools`, which is
+      // what the harness always sends alongside a replayed call. Dropping the
+      // resolver here is what turned every tool-side image into placeholder text.
+      const { text, images } = partsOf(message.content, resolveImage)
       // A tool message answers a call, so it is always sent even when empty.
-      return { role: 'tool', tool_call_id: message.toolCallId, content: text }
+      return { role: 'tool', tool_call_id: message.toolCallId, content: contentOf(text, images) }
     }
   }
 }

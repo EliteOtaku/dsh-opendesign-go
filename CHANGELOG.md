@@ -2,6 +2,25 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 0.1.7
+
+三处修复：工具读到的图片现在真的会发给模型；配置写入不再每轮都抢 profile 的锁。
+
+### 工具读到的图片发不出去
+
+- `read_image` 的回答是一条 **tool** 消息，而 `toChatMessage` 处理 tool 角色时把图片解析器传成了 `undefined`，于是每张工具侧图片都被换成占位文本 `[image omitted because this model accepts text only]`。模型于是回答"我看不到图片"，看起来像模型不支持视觉，实际是我们自己没发。
+- 现在 tool 消息也走同一个解析器，图片按 `image_url` 发出。网关实测：`tool` 角色带图返回 200 并正确识别颜色，**前提是请求同时声明了 `tools`**——宿主的真实请求总是带着工具表，所以这条路径可用；我最初用不声明 `tools` 的裸请求探测，撞到的是另一条规则（`reasoning_content must be passed back`），与图片无关。
+- 新增测试固定住这条路径，并做过反向验证：把解析器改回 `undefined`，新测试立刻失败。
+
+### 配置写入不再无条件抢锁
+
+- 宿主的 `settings.update` 会锁住 profile 根目录的 `package.json` 并重写整份 composition 文档（本机 55KB，1–2 秒），随后重算插件树。此前每次调用都无条件写入：`reportJson` 每次模型调用写一次（实测约 1814 次/天），`usageJson` 每 60 秒写一次（1440 次/天），一天数千次 profile 级加锁，插件市场安装要同一把锁就会长时间等待甚至超时。
+- `fieldWriterOf` 现在先读该 entry 当前的 `value`，与待写入的 JSON 相等就直接返回；短路放在重试循环内部，每次重写前重新读，保持 revision 围栏语义——值变了仍带 `row.revision` 写入，不会覆盖页面上的并发编辑。
+- 写入失败不再死重试 12 次：等服务与 entry 出现是免费的（纯定时器，`WAIT_ATTEMPTS = 12`），真正写入最多两次（`WRITE_ATTEMPTS = 2`）；只有 `SETTINGS_CONFLICT` 值得重试一次，其他错误记一条 warn 就放弃。每次重试都可能触发一次插件树重建，代价远高于"这次没写进去"。
+- `usageJson` 与 `reportJson` 加 5 分钟节流（`PUBLISH_MIN_INTERVAL_MS`）：实测写入上限从约 1814 + 1440 次/天降到各 288 次/天。配置变化（含手动刷新）仍然立即发布，不等节流。
+- `diagnosticsJson` 增加指纹比较，`asOf` 之外的内容没变就不写。
+- 配置变化监听间隔 `FAST_WATCH_MS` 从 300ms 改为 1000ms。桌面端常开数天，高频率定时器是长期成本；1 秒对手动刷新仍然是即时响应。
+
 ## 0.1.6
 
 修好「模型不能识图」：模态字段读错了表，以及一处自相矛盾的声明。

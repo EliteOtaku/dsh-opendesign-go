@@ -506,3 +506,97 @@ describe('OpenDesignAdapter.resolveModel', () => {
     expect(resolved.inputModalities).toBeUndefined()
   })
 })
+
+describe('OpenDesignAdapter image dispatch', () => {
+  /** One user turn carrying a single durable image reference. */
+  const imageRequest = (model: string): GenerateOptions => ({
+    provider: 'dsh-opendesign-go',
+    model,
+    messages: [{
+      role: 'user',
+      content: [{ type: 'image', attachment: { attachmentId: 'sha256:ab' } } as unknown as ContentBlock],
+    }],
+  })
+
+  /** The wire content of the single user message a stub captured. */
+  const wireContent = (fetchMock: ReturnType<typeof stubFetch>): unknown => {
+    const init = fetchMock.mock.calls[0]![1]
+    const body = JSON.parse(String(init.body)) as { messages: { role: string, content: unknown }[] }
+    return body.messages.at(-1)?.content
+  }
+
+  it('sends image bytes for a model that declares image input', async () => {
+    // The resolver is only reachable through the declared modality. When either
+    // half of that pairing regresses, the request carries placeholder text and
+    // the model answers as though it never saw a picture — a failure that looks
+    // like a model limitation, so both halves are pinned here.
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '看到' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const url = 'data:image/png;base64,AAAA'
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => url,
+    })
+    await collect(adapter.stream(imageRequest(MODEL)))
+    expect(wireContent(fetchMock)).toEqual([{ type: 'image_url', image_url: { url } }])
+  })
+
+  it('projects to placeholder text for a model documented as text-only', async () => {
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '看到' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => 'data:image/png;base64,AAAA',
+    })
+    await collect(adapter.stream(imageRequest('deepseek-v4-pro')))
+    // Not sent as an image part, and not dropped either: the model is told an
+    // image existed and could not be shown.
+    const content = String(wireContent(fetchMock))
+    expect(content).toContain('image omitted')
+  })
+
+  it('sends image bytes carried by a tool result', async () => {
+    // `read_image` answers with the bytes it read, so the image lands in a tool
+    // message rather than a user turn. Projecting that message without a
+    // resolver silently replaced every tool-side image with placeholder text,
+    // which reads as a model that cannot see pictures.
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '看到' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const url = 'data:image/jpeg;base64,BBBB'
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => url,
+    })
+    await collect(adapter.stream({
+      provider: 'dsh-opendesign-go',
+      model: MODEL,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '读一下这张图' }] },
+        {
+          role: 'assistant',
+          content: [{
+            type: 'tool-call',
+            id: 'call_1',
+            name: 'read_image',
+            arguments: '{"path":"a.jpg"}',
+          } as unknown as ContentBlock],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'call_1',
+          content: [{ type: 'image', attachment: { attachmentId: 'sha256:bb' } } as unknown as ContentBlock],
+        },
+      ],
+    }))
+    expect(wireContent(fetchMock)).toEqual([{ type: 'image_url', image_url: { url } }])
+  })
+})

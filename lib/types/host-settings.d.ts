@@ -20,20 +20,17 @@ import type { Context } from '@deepseek-ai/cordis';
  */
 export declare function installHostSettings(ctx: Context): void;
 /**
- * Expose a writer for the quota cache.
- *
- * The page reads `usageJson` from the config mirror, so the host publishes a
- * reading by writing that field. Keeping the write here means the plugin never
- * keeps a second copy of the quota state: one document, one source of truth.
- * @param ctx - host context that may carry a settings service.
- * @returns a writer, or undefined when this host cannot write settings.
- */
-/**
  * Expose a writer for one cached field.
  *
  * The page reads these fields from the config mirror, so the host publishes a
  * value by writing it. Keeping the write here means the plugin never keeps a
  * second copy of the state: one document, one source of truth.
+ *
+ * Every call is cheap when it has nothing to say. A write costs a profile-level
+ * file lock and a full plugin-tree recomposition, so the writer checks what the
+ * entry already carries — and what this process last wrote — before touching the
+ * document. A poll that answers the same way as last time therefore costs one
+ * `describe()` and no I/O.
  * @param ctx - host context that may carry a settings service.
  * @returns a writer for a named field, or undefined when this host cannot write.
  */

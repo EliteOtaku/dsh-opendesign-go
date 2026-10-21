@@ -36,7 +36,8 @@ import { join } from 'node:path'
 import { parseRecoveredProviders, scanSessions } from './session-usage.ts'
 import { readDue } from './quota-cadence.ts'
 import { fetchLatestRelease, pendingUpdate } from './update-check.ts'
-import { readFileSync } from 'node:fs'
+import { imageResolverOf } from './image-bytes.ts'
+import type { AttachmentsSeam } from './image-bytes.ts'
 import { homedir } from 'node:os'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { UsageSnapshot } from './usage-contract.ts'
@@ -44,8 +45,13 @@ import type { UsageSnapshot } from './usage-contract.ts'
 /** How often a failed quota read is retried before giving up for the session. */
 const MAX_USAGE_RETRIES = 6
 
-/** How often a configuration change is noticed, in milliseconds. */
-const FAST_WATCH_MS = 300
+
+/** How often a configuration change is noticed, in milliseconds.
+ *
+ * The config document has no change event, so this is a poll of an in-memory
+ * object — cheap, but not free on a host that stays open for days. One second
+ * still reads as instant when a user flips a switch. */
+const FAST_WATCH_MS = 1_000
 
 /** Steady-state quota read interval, in milliseconds.
  *
@@ -57,7 +63,26 @@ const SLOW_POLL_MS = 60_000
 
 /** Local usage report window: the trailing 30 days. */
 const REPORT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+
+/**
+ * How often one cached field may be written into the profile.
+ *
+ * Every `settings.update` makes the host lock the profile directory and rewrite
+ * the whole composition document, which recomposes this plugin tree. At one
+ * write per model call that is thousands of file locks a day, and a plugin
+ * install that needs the same lock then waits — the failure this constant
+ * exists to prevent. Five minutes still publishes the first change of any quiet
+ * period immediately; a user watching the page never sees a stale number for
+ * more than one poll.
+ *
+ * The alternative the report deserves — publish only while the page is open —
+ * is not reachable here: the only channel from the client to the host is the
+ * config document itself, so asking "is the page open?" would cost the very
+ * write being avoided.
+ */
+const PUBLISH_MIN_INTERVAL_MS = 5 * 60 * 1000
 import { fieldWriterOf, installHostSettings } from './host-settings.ts'
+import { createThrottle, systemClock } from './throttle.ts'
 import { OpenDesignUsageService, sessionResolverOf } from './usage.ts'
 import { DEFAULT_SESSION_REF } from './config-contract.ts'
 
@@ -126,6 +151,30 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   ctx.set('openDesignGoUsage', usage)
 
   /**
+   * Publish a quota reading at most once per throttle interval.
+   *
+   * Two mechanisms cooperate. The throttle bounds how often a *reading* costs a
+   * profile write; the writer's own value check skips the write when the reading
+   * is identical anyway. Readings carry a fresh `asOf`, so the value check alone
+   * would never fire — the throttle is what keeps a 60-second poll from becoming
+   * 1,440 profile-level file locks a day.
+   */
+  let pendingUsage: UsageSnapshot | undefined
+  const usageThrottle = createThrottle({
+    intervalMs: PUBLISH_MIN_INTERVAL_MS,
+    clock: systemClock,
+    publish: () => {
+      const snapshot = pendingUsage
+      if (snapshot === undefined) return
+      pendingUsage = undefined
+      const write = fieldWriterOf(ctx)
+      if (write === undefined) return
+      void write('usageJson', JSON.stringify(snapshot)).catch(() => undefined)
+    },
+  })
+  ctx.effect(() => () => { usageThrottle.dispose() })
+
+  /**
    * Read the quota channel and publish the result into the config document,
    * which is the channel the page already receives.
    *
@@ -135,10 +184,11 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    *
    * A failure is published too: the page can then say why it has no numbers
    * instead of showing a stale reading with no explanation.
+   * @param options - `force` publishes this reading regardless of the throttle,
+   * used when the user pressed refresh and is waiting on the result.
+   * @returns the reading, published or not.
    */
-  const refreshUsage = async (): Promise<UsageSnapshot | undefined> => {
-    const write = fieldWriterOf(ctx)
-    if (write === undefined) return undefined
+  const refreshUsage = async (options: { force?: boolean } = {}): Promise<UsageSnapshot | undefined> => {
     const config = current()
     let snapshot: UsageSnapshot
     if (config.useVelaCredential) {
@@ -160,7 +210,8 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     } else {
       snapshot = await usage.read()
     }
-    await write('usageJson', JSON.stringify(snapshot))
+    pendingUsage = snapshot
+    usageThrottle.request(options.force === true)
     ctx.logger.info(`llm-opendesign-go: quota ${usage.describe(snapshot)}`)
     return snapshot
   }
@@ -180,11 +231,14 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * failed one: a startup attempt can lose a race against the settings service
    * or the CLI probe, and treating that as success would leave the bar empty
    * for the whole session.
+   * @param options - `force` publishes immediately instead of waiting out the
+   * publish throttle.
+   * @returns the reading, when one was attempted.
    */
-  const refreshIfConfigured = async (): Promise<UsageSnapshot | undefined> => {
+  const refreshIfConfigured = async (options: { force?: boolean } = {}): Promise<UsageSnapshot | undefined> => {
     if (!wantsUsage()) return undefined
     try {
-      return await refreshUsage()
+      return await refreshUsage(options)
     } catch (error) {
       ctx.logger.warn(`llm-opendesign-go: quota refresh failed (${String(error)})`)
       return undefined
@@ -236,17 +290,19 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       wantsUsage: wantsUsage(),
     })) return
     if (!changed) retries += 1
-    void refreshIfConfigured().then((snapshot) => {
+    // A configuration change — including the refresh button's nonce — means
+    // someone is waiting on this number, so it is published at once instead of
+    // waiting out the publish throttle.
+    void refreshIfConfigured({ force: changed }).then((snapshot) => {
       if (usable(snapshot)) retries = MAX_USAGE_RETRIES
     })
   }
 
   ctx.effect(() => {
     // The config document has no change event on this host, so the same values
-    // are compared on a timer. The watch runs faster than the read because the
-    // read spawns a CLI process: a user who has just flipped the vela switch is
-    // watching the card, and a five-second wait reads as a dead control, so a
-    // change triggers an immediate read while steady state stays cheap.
+    // are compared on a timer. The watch polls an in-memory object while the
+    // read spawns a CLI process, so watching faster than reading is what keeps a
+    // flipped switch from feeling dead; steady-state reads stay once a minute.
     let timer: ReturnType<typeof setTimeout> | undefined
     const step = (): void => {
       // `tick` queues the read and returns; overlapping reads are already
@@ -329,12 +385,18 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     return recoveredCache
   }
 
-  /** Recompute the report and publish it, debounced to one write per burst. */
-  let pendingReport: ReturnType<typeof setTimeout> | undefined
-  const publishReport = (): void => {
-    if (pendingReport !== undefined) return
-    pendingReport = setTimeout(() => {
-      pendingReport = undefined
+  /**
+   * Publish the usage report at most once per throttle interval.
+   *
+   * The report is recomputed from the local ledger on every model call, but
+   * writing it into the profile costs a profile-level file lock and a plugin-tree
+   * recomposition — far more than a page that nobody is looking at is worth. The
+   * burst behaviour still lands one write, so a single call updates the page.
+   */
+  const reportThrottle = createThrottle({
+    intervalMs: PUBLISH_MIN_INTERVAL_MS,
+    clock: systemClock,
+    publish: () => {
       const write = fieldWriterOf(ctx)
       if (write === undefined) return
       const now = Date.now()
@@ -342,11 +404,10 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       const recovered = recoveredSpend()
       const report = recovered === undefined ? base : { ...base, recovered }
       void write('reportJson', JSON.stringify(report)).catch(() => undefined)
-    }, 1_000)
-  }
-  ctx.effect(() => () => {
-    if (pendingReport !== undefined) clearTimeout(pendingReport)
+    },
   })
+  const publishReport = (): void => { reportThrottle.request() }
+  ctx.effect(() => () => { reportThrottle.dispose() })
   const recordUsage = (call: { model: string, accountRef: string, usage: TokenUsage }): void => {
     const price = priceOf(call.model)
     ledger.record({
@@ -384,46 +445,48 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   let routeCheck = 0
 
   /**
-   * Guess a media type from a normalized attachment's extension.
+   * The attachment store, resolved through its own injection scope.
    *
-   * The attachment service normalizes to a small set of formats, so an
-   * extension map is enough; an unknown extension falls back to PNG because the
-   * service re-encodes to it when the input format is not one it preserves.
-   * @param path - absolute path to normalized bytes.
-   * @returns the media type to declare.
+   * A service is only readable on a context that declared it: `ctx.get` on the
+   * plugin's own context answers `undefined` even while the store is mounted.
+   * Reading it there would make every image resolve to no bytes, and the request
+   * would carry the text-only placeholder instead of the picture — which looks
+   * exactly like a model that cannot see images, so the symptom points at the
+   * model rather than at this lookup. Declaring the dependency fixes the lookup
+   * for the whole dispatch path.
    */
-  const mediaTypeOf = (path: string): string => {
-    const lower = path.toLowerCase()
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
-    if (lower.endsWith('.webp')) return 'image/webp'
-    if (lower.endsWith('.gif')) return 'image/gif'
-    return 'image/png'
-  }
+  let attachments: AttachmentsSeam | undefined
 
   /**
-   * Resolve one durable image reference to an inline data URL.
+   * Read one durable image's normalized bytes as an inline data URL.
    *
-   * The attachment service owns normalized bytes; the adapter cannot read them
-   * any other way, and the harness keeps no copy in the request. Bytes are read
-   * synchronously because projection is synchronous — the files are small
-   * normalized rasters and this runs once per image per request.
+   * The store owns the normalized raster; nothing else can produce it, and the
+   * harness keeps no copy in the request. Bytes are read synchronously because
+   * projection is synchronous — these are small normalized rasters and this runs
+   * once per image per request.
+   * @param attachment - durable attachment reference from an image block.
+   * @returns a data URL, or undefined when this route cannot supply bytes.
    */
-  const imageDataUrl = (attachment: unknown): string | undefined => {
-    const attachments = ctx.get('attachments') as {
-      imageHostPath?: (ref: unknown) => string | undefined
-    } | undefined
-    if (attachments === undefined || typeof attachments.imageHostPath !== 'function') return undefined
-    const path = attachments.imageHostPath(attachment)
-    if (path === undefined || path.length === 0) return undefined
-    try {
-      const bytes = readFileSync(path)
-      const media = mediaTypeOf(path)
-      return `data:${media};base64,${bytes.toString('base64')}`
-    } catch (error) {
-      ctx.logger.warn(`llm-opendesign-go: could not read image bytes (${String(error)})`)
-      return undefined
-    }
-  }
+  const imageDataUrl = imageResolverOf(
+    () => attachments,
+    (message) => { ctx.logger.warn(message) },
+  )
+
+  /**
+   * Mount the image-bytes seam.
+   *
+   * Optional on purpose: a host without an attachment store still serves text
+   * requests, and vetoing activation over it would turn a missing optional
+   * service into a plugin that refuses to load. When it is absent, image blocks
+   * fall back to their placeholder text and the model is told an image exists
+   * rather than being handed nothing.
+   */
+  ctx.inject(['attachments'], (attachmentCtx) => {
+    attachments = attachmentCtx.get('attachments') as AttachmentsSeam | undefined
+    ctx.logger.info(
+      `llm-opendesign-go: attachment store ${attachments === undefined ? 'absent; images project to text' : 'mounted'}`,
+    )
+  })
 
   const adapter = new OpenDesignAdapter({
     config: current,
@@ -447,19 +510,26 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * switch remains reachable.
    * @param configured - whether the credential resolved.
    */
+  /** The last published route facts, excluding the timestamp. */
+  let lastDiagnostics: string | undefined
   /**
    * Publish what the routing layer currently believes.
    *
    * The model picker shows nothing when the route is absent, and the reason can
    * be any of "disabled", "no credential", or "registration refused" — all of
    * which look identical in the UI. This makes the state visible instead.
+   *
+   * Only a change in what is being *said* is published. `syncRoute` runs on
+   * every credential event and on every configuration change, so an
+   * unconditional write here would mean a profile-level file lock — and a plugin
+   * tree recomposition — for each of them, while the answer almost never moves.
+   * The timestamp therefore follows the last real change rather than the last
+   * call.
    * @param configured - whether the selected account's credential resolved.
    * @param triedRef - the reference that was resolved.
    * @param lastError - registration failure, when one occurred.
    */
   const publishDiagnostics = (configured: boolean, triedRef: string, lastError?: string): void => {
-    const write = fieldWriterOf(ctx)
-    if (write === undefined) return
     const payload: RouteDiagnostics = {
       registered: registration !== undefined,
       enabled: current().enabled,
@@ -469,6 +539,12 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       modelCount: listSeedModels(PROVIDER_ID).length,
       asOf: new Date().toISOString(),
     }
+    const { asOf: _asOf, ...facts } = payload
+    const fingerprint = JSON.stringify(facts)
+    if (fingerprint === lastDiagnostics) return
+    const write = fieldWriterOf(ctx)
+    if (write === undefined) return
+    lastDiagnostics = fingerprint
     void write('diagnosticsJson', JSON.stringify(payload)).catch(() => undefined)
   }
 
