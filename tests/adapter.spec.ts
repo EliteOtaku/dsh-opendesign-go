@@ -465,3 +465,44 @@ describe('toChatTools', () => {
     ])
   })
 })
+
+describe('OpenDesignAdapter.resolveModel', () => {
+  /**
+   * The host's image tool calls `llm.resolveModelInfo` and refuses the read
+   * unless the resolved route names `image` explicitly. `resolveModel` used to
+   * take modalities from the seed row, which carries only id and name, so every
+   * model resolved with no modality at all and reading an image failed with
+   * "this model does not declare image input" even for a vision model.
+   */
+  it('declares image input for a model whose vendor table allows it', async () => {
+    const resolved = await adapterWith().resolveModel('dsh-opendesign-go', 'deepseek-v4.1-flash')
+    expect(resolved.inputModalities).toContain('image')
+  })
+
+  it('declares text only for a model documented as text-only', async () => {
+    // DeepSeek's pricing table marks 图像理解 as 不支持 for V4-Pro, and the
+    // gateway answers 404 "No endpoints found that support image input" for Hy4.
+    const pro = await adapterWith().resolveModel('dsh-opendesign-go', 'deepseek-v4-pro')
+    expect(pro.inputModalities).toEqual(['text'])
+    const hy = await adapterWith().resolveModel('dsh-opendesign-go', 'hy4-preview')
+    expect(hy.inputModalities).toEqual(['text'])
+  })
+
+  it('agrees with the picker for every seeded model', async () => {
+    // The picker reads listModels, the request path reads resolveModel. A
+    // disagreement between them is invisible until a capability is used.
+    const adapter = adapterWith()
+    const listed = await adapter.listModels('dsh-opendesign-go')
+    for (const row of listed) {
+      const resolved = await adapter.resolveModel('dsh-opendesign-go', row.id)
+      expect(resolved.inputModalities, `modality mismatch for ${row.id}`).toEqual(row.inputModalities)
+    }
+  })
+
+  it('omits context and max tokens for a model newer than this build', async () => {
+    const resolved = await adapterWith().resolveModel('dsh-opendesign-go', 'unreleased-model')
+    expect(resolved.context).toBeUndefined()
+    expect(resolved.defaultMaxTokens).toBeUndefined()
+    expect(resolved.inputModalities).toBeUndefined()
+  })
+})

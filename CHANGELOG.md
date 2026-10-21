@@ -2,6 +2,16 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 未发布
+
+修好「模型不能识图」：模态字段读错了表，以及一处自相矛盾的声明。
+
+- 宿主的图片工具会调用 `llm.resolveModelInfo`，只有解析出的路由显式声明了 `image` 才允许读图。`resolveModel` 此前从 `catalog.ts` 的静态目录取模态，而那张表只有 id 和 name，于是**每个**模型解析出的模态都是空，连视觉模型也被判成不能识图。现在改读 `MODEL_DEFAULTS`，与选择器和请求门控同源。
+- `CatalogModel` 不再携带 `inputModalities` 字段，从类型上排除了两处再次分叉。
+- `deepseek-v4-flash` 的模态改为 `text, image`。官方价格页脚注说它与 `deepseek-v4-flash-vision-exp` 都由 DeepSeek-V4.1-Flash-1017 承接，此前把同一个后端写成了两种能力。
+- 每个模型的模态现在都对应一条厂商文档里的明确表述（DeepSeek 价格页的「图像理解」行、智谱的介绍页、Kimi 的模型页、MiMo 的模型列表、腾讯把视觉放在独立的 vision 系列），出处列在 `docs/models.md`。测试会把 12 个模型强制分进「支持图片」和「仅文本」两组并要求并集等于全集，漏写会失败。
+- README 补三张设置页截图。
+
 ## 0.1.5
 
 修复历史回放在部分 Node 24 上重复计数。

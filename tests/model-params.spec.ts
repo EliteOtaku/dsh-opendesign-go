@@ -59,9 +59,49 @@ describe('gateway model defaults', () => {
     expect(MODEL_DEFAULTS['gpt-6-luna']?.contextWindow).toBe(1_050_000)
   })
 
-  it('declares image input only where the gateway reports it', () => {
-    expect(MODEL_DEFAULTS['deepseek-v4.1-flash']?.inputModalities).toContain('image')
-    expect(MODEL_DEFAULTS['deepseek-v4-flash']?.inputModalities).toEqual(['text'])
+  it('takes input modalities from vendor docs, one row per model', () => {
+    // Every entry is pinned to a vendor statement, because a wrong modality is
+    // invisible: the picker just hides the capability and the request path
+    // silently downcasts an image to placeholder text.
+    const image = [
+      // deepseek.com pricing table marks 图像理解 支持 for deepseek-flash, and
+      // docs list PNG/JPEG/GIF/WebP for it.
+      'deepseek-v4.1-flash',
+      // Both retired ids are served by DeepSeek-V4.1-Flash-1017, so they inherit
+      // its image support. One was previously declared text-only, which
+      // described the same backend two different ways.
+      'deepseek-v4-flash',
+      'deepseek-v4-flash-vision-exp',
+      // Anthropic vision is standard on Haiku 5.5.
+      'claude-haiku-5.5',
+      // OpenAI vision on GPT-6 Luna.
+      'gpt-6-luna',
+      // docs.bigmodel.cn describes GLM-5.3-Flash/FlashX as 原生多模态 with
+      // 视频、图像、文本、文件 input.
+      'glm-5.3-flash',
+      'glm-5.3-flashx',
+      // platform.kimi.com: K2.7 Code takes 文本、图片与视频.
+      'kimi-k2.7-code',
+      // mimo.mi.com model list marks both V2.6 models as 全模态理解.
+      'mimo-v2.6-flash',
+      'mimo-v2.6-pro',
+    ]
+    const textOnly = [
+      // Same DeepSeek pricing table: 图像理解 不支持 for V4-Pro.
+      'deepseek-v4-pro',
+      // Tencent keeps vision on separate hunyuan-vision ids; the gateway
+      // answers 404 "No endpoints found that support image input" for H4.
+      'hy4-preview',
+    ]
+    for (const id of image) {
+      expect(MODEL_DEFAULTS[id]?.inputModalities, id).toContain('image')
+    }
+    for (const id of textOnly) {
+      expect(MODEL_DEFAULTS[id]?.inputModalities, id).toEqual(['text'])
+    }
+    // The two lists must partition the table: a model missing from both would
+    // pass silently with whatever the old value was.
+    expect([...image, ...textOnly].sort()).toEqual(Object.keys(MODEL_DEFAULTS).sort())
   })
 })
 

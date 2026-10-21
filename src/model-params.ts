@@ -63,9 +63,14 @@ export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
   // reports "maximum context length is 1000000 tokens".
   'claude-haiku-5.5': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','max'] },
   // api-docs.deepseek.com/zh-cn/quick_start/pricing: 1M context, 384K output.
-  // The two retired ids route to V4.1-Flash per that page's footnote 1.
-  'deepseek-v4-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
+  // Its footnote 1 says both retired ids (`deepseek-v4-flash` and
+  // `deepseek-v4-flash-vision-exp`) are still callable but now served by
+  // DeepSeek-V4.1-Flash-1017 — so both inherit V4.1-Flash's limits *and* its
+  // image support. Declaring only one of them image-capable described the same
+  // backend two different ways and hid the capability behind the other id.
+  'deepseek-v4-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
   'deepseek-v4-flash-vision-exp': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
+  // The same pricing table's 功能 row marks 图像理解 as 不支持 for V4-Pro.
   'deepseek-v4-pro': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
   'deepseek-v4.1-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
   // docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash and its English mirror

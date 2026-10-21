@@ -228,8 +228,13 @@ export class OpenDesignAdapter extends LlmAdapter {
       provider,
       id: row.id,
       name: row.name,
-      ...(row.inputModalities === undefined ? {} : { inputModalities: row.inputModalities }),
+      // Modalities come from MODEL_DEFAULTS, never from the seed row. The seed
+      // table carries only id and name, so reading it here left every model
+      // declaring no input modality — and the host's image tool refuses to read
+      // an image unless the resolved route names `image` explicitly, which made
+      // "this model cannot see images" the reported symptom of a table mismatch.
       ...(params === undefined ? {} : {
+        inputModalities: params.inputModalities,
         context: { contextWindow: params.contextWindow },
         defaultMaxTokens: params.maxTokens,
       }),

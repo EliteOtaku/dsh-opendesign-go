@@ -9,7 +9,7 @@
 | 显示名 | ID | 上下文 | 输出上限 | 输入模态 |
 | --- | --- | --- | --- | --- |
 | DeepSeek V4.1 Flash | `deepseek-v4.1-flash` | 1,000,000 | 384,000 | text, image |
-| DeepSeek V4 Flash | `deepseek-v4-flash` | 1,000,000 | 384,000 | text |
+| DeepSeek V4 Flash | `deepseek-v4-flash` | 1,000,000 | 384,000 | text, image |
 | DeepSeek V4 Flash Vision Exp | `deepseek-v4-flash-vision-exp` | 1,000,000 | 384,000 | text, image |
 | DeepSeek V4 Pro | `deepseek-v4-pro` | 1,000,000 | 384,000 | text |
 | Claude Haiku 5.5 | `claude-haiku-5.5` | 1,000,000 | 128,000 | text, image |
@@ -23,7 +23,7 @@
 
 参数的取值依据（代码注释里保留了出处）：
 
-- **DeepSeek 系**：1M 上下文、384K 输出。`deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 是已退役 ID，网关仍路由到 V4.1-Flash，因此沿用同一组参数。实测 `max_tokens: 384000` 会被接受，网关 `metadata.output_budget` 里的 128000 只是广播元数据，不是硬限制。
+- **DeepSeek 系**：1M 上下文、384K 输出。`deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 是已退役 ID，官方文档的脚注明确两者都由 DeepSeek-V4.1-Flash-1017 承接，因此这两个 ID 的参数**与图片能力**都同 V4.1-Flash。`deepseek-v4-pro` 是另一个模型，官方价格表的「图像理解」一行对它标的是**不支持**。实测 `max_tokens: 384000` 会被接受，网关 `metadata.output_budget` 里的 128000 只是广播元数据，不是硬限制。
 - **Claude Haiku 5.5**：1M 上下文（比早期的 200K 放宽）、128K 输出。超限时端点会报 `maximum context length is 1000000 tokens`，这条独立印证了上下文数字。
 - **GLM-5.3 两个型号**：1M 上下文、128K 输出。
 - **GPT-6 Luna**：1,050,000 总上下文、128K 输出（922,000 输入 + 128,000 输出 = 1,050,000，三个数字自洽）。实测 1.5M token 的 prompt 未被端点拒绝，说明端点不自校验，这里采用文档值。
@@ -31,11 +31,21 @@
 - **MiMo 两个型号**：1M 上下文、128K 输出。
 - **Hunyuan H4 Preview**：1M 上下文、64K 输出。
 
-模态只写在模型 ID 能说明的地方，其余保持未知而不猜测。
+模态全部取自厂商文档，逐条注明出处：
 
-「图片输入」一列取自 `src/model-params.ts` 的 `MODEL_DEFAULTS`，厂商文档是唯一依据。
+| 厂商 | 依据 |
+| --- | --- |
+| DeepSeek | [价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing) 的「图像理解」行：`deepseek-flash` 支持、`deepseek-v4-pro` 不支持；脚注(1) 说明两个退役 ID 由 V4.1-Flash 承接。格式见[图像理解](https://api-docs.deepseek.com/zh-cn/guides/vision)页（JPEG/PNG/GIF/WebP） |
+| Anthropic | Haiku 5.5 标准支持图像输入 |
+| OpenAI | GPT-6 Luna 标准支持图像输入 |
+| 智谱 | [GLM-5.3-Flash/FlashX 页](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)：原生多模态，输入模态为「视频、图像、文本、文件」 |
+| 月之暗面 | [Kimi K2.7 Code 页](https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart)：支持「文本、图片与视频输入」 |
+| 小米 | [MiMo 模型列表](https://mimo.mi.com/docs/zh-CN/quick-start/summary/model)：两个 V2.6 型号均标注「全模态理解」 |
+| 腾讯 | 混元把视觉能力放在独立的 `hunyuan-vision` 系列，H4 不在其中；网关对 H4 也返回 404 `No endpoints found that support image input` |
 
-这张表是模态的**唯一来源**：会话选择器的模态提示（`catalog.ts` 的 `listSeedModels`）和请求门控（`adapter.ts` 的 `#imageResolverFor`）都读它。因此上表显示的图片能力与实际能否发送图片始终一致，不会出现「列表说不行、实际能发」这类错位。
+「图片输入」一列取自 `src/model-params.ts` 的 `MODEL_DEFAULTS`。
+
+这张表是模态的**唯一来源**：会话选择器的模态提示（`catalog.ts` 的 `listSeedModels`）、请求参数解析（`adapter.ts` 的 `resolveModel`）和请求门控（`adapter.ts` 的 `#imageResolverFor`）都读它。`resolveModel` 曾经改从 `catalog.ts` 的静态目录读模态，而那张表只有 id 和 name，于是每个模型解析出的模态都是空 —— 宿主的图片工具据此拒绝读图，表现为「这个模型不能识图」。现在 `CatalogModel` 已不再携带模态字段，从类型上排除了再次分叉。
 
 文本模型收到图片时会替换为占位文本，不会把图片字节发到网关。
 

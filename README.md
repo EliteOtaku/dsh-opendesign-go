@@ -2,6 +2,8 @@
 
 在 DSH 里使用 OpenDesign Go 订阅的 12 个模型：推理走 OpenAI Chat Completions 协议，额度、用量和多账号都在设置页里。
 
+![OpenDesign Go 设置页](docs/images/setup.png)
+
 ## 关于作者
 
 交易员，业余写工具。这个插件起源于我自己拿 DeepSeek 做量化策略研究和复盘时的需要。
@@ -28,6 +30,16 @@
 所有用量数字都标注了口径。金额按官方公开价目表的**基础档**估算，超出阶梯阈值的长上下文请求会被低估；这不是账单，实际扣费以 OpenDesign 控制台为准。
 
 多账号的要点：每个账号对应**一份独立的订阅**。同一工作空间内的多把 Key 共享同一份额度，所以多账号的意义是「多买几份 Go」，不是把一份订阅拆成多把钥匙。
+
+## 示意图
+
+订阅额度卡片，两个滚动窗口各自的剩余百分比、剩余金额与已用金额：
+
+![额度卡片](docs/images/quota.png)
+
+可用模型列表，取消勾选即从会话的模型选择器移除，也可逐项改参数：
+
+![可用模型](docs/images/models.png)
 
 ## 安装
 
@@ -121,7 +133,7 @@ Go 套餐授予 12 个 Design Plan 模型。默认参数取自各厂商文档，
 | 模型 | ID | 上下文 | 输出上限 | 图片输入 |
 | --- | --- | --- | --- | --- |
 | DeepSeek V4.1 Flash | `deepseek-v4.1-flash` | 1,000,000 | 384,000 | 支持 |
-| DeepSeek V4 Flash | `deepseek-v4-flash` | 1,000,000 | 384,000 | — |
+| DeepSeek V4 Flash | `deepseek-v4-flash` | 1,000,000 | 384,000 | 支持 |
 | DeepSeek V4 Flash Vision Exp | `deepseek-v4-flash-vision-exp` | 1,000,000 | 384,000 | 支持 |
 | DeepSeek V4 Pro | `deepseek-v4-pro` | 1,000,000 | 384,000 | — |
 | Claude Haiku 5.5 | `claude-haiku-5.5` | 1,000,000 | 128,000 | 支持 |
@@ -135,11 +147,11 @@ Go 套餐授予 12 个 Design Plan 模型。默认参数取自各厂商文档，
 
 说明：
 
-- `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 是已退役的 ID，网关仍路由到 V4.1-Flash，因此沿用 V4.1-Flash 的参数。
+- `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 是已退役的 ID，官方文档说明两者都由 DeepSeek-V4.1-Flash 承接，因此参数与图片能力都沿用 V4.1-Flash。`deepseek-v4-pro` 是另一个模型，官方价格表对它的「图像理解」标的是不支持。
 - 覆盖值的允许范围：上下文窗口 1,000–10,000,000，输出上限 1–1,000,000。越界会被拒绝并提示，不会静默截断。
 - 请求没有显式给出 `maxTokens` 时，插件用上表的输出上限作为 `max_tokens`；留空即沿用这个默认值。
-- 思考等级统一提供 `minimal` / `low` / `medium` / `high`，默认 `medium`。网关对这四个值都接受，但不公布每模型的差异。
-- **「图片输入」一列取自 `src/model-params.ts` 的 `MODEL_DEFAULTS`**，厂商文档是唯一依据。会话选择器和请求门控都读这张表，因此列表里显示的图片能力与实际能否发送图片一致。文本模型收到图片时会得到占位文本，不会把图片字节发给网关。
+- 思考等级按模型给出，取自网关对每个模型实际接受的集合，见 [docs/models.md](docs/models.md)。
+- **「图片输入」一列取自 `src/model-params.ts` 的 `MODEL_DEFAULTS`**，厂商文档是唯一依据，出处逐条列在 [docs/models.md](docs/models.md)。会话选择器、参数解析和请求门控都读这张表，因此列表里显示的图片能力与实际能否发送图片一致。文本模型收到图片时会得到占位文本，不会把图片字节发给网关。
 
 更多细节见 [docs/models.md](docs/models.md)。
 
