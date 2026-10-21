@@ -194,24 +194,45 @@ describe('readSessionLog', () => {
       const bytes = Buffer.concat(frames)
       writeFileSync(path, bytes)
 
-      /** A decoder that returns every remaining frame, like some 24.x builds. */
-      const chaining = (slice: Buffer): Buffer => {
-        let out = ''
-        let rest = slice
-        while (rest.length > 0) {
-          try {
-            out += zstdDecompressSync(rest).toString('utf8')
-          } catch {
-            break
-          }
-          const next = rest.indexOf(Buffer.from([0x28, 0xb5, 0x2f, 0xfd]), 4)
-          if (next < 0) break
-          rest = rest.subarray(next)
+      /**
+       * A decoder that consumes every complete frame inside the slice, like
+       * some 24.x builds do. Given one frame it returns one frame; given the
+       * whole tail — which is what the old walk passed — it returns every
+       * remaining frame, so one pass over the tail reproduced the whole log and
+       * the walk counted it again on each iteration.
+       *
+       * Deriving this from the known plaintext rather than by looping a real
+       * decoder keeps it faithful on both kinds of runtime: looping a chaining
+       * decoder here would itself double-count, so the mock's answer would
+       * depend on the host it runs on.
+       */
+      const offsets: number[] = []
+      {
+        let at = 0
+        for (const frame of frames) {
+          offsets.push(at)
+          at += frame.length
         }
-        return Buffer.from(out, 'utf8')
+      }
+      const chaining = (slice: Buffer): Buffer => {
+        const first = offsets.findIndex((offset) => bytes.subarray(offset, offset + slice.length).equals(slice))
+        if (first < 0) throw new Error('slice does not start at a frame boundary')
+        // Consume the frames that end inside the slice. Comparing frame ends —
+        // not the next frame's start — is what keeps a one-frame slice from
+        // reporting two: the next start is always exactly the slice length away.
+        const origin = offsets[first] ?? 0
+        let count = 0
+        while (first + count < offsets.length) {
+          const end = (offsets[first + count] ?? 0) + (frames[first + count]?.length ?? 0)
+          if (end - origin > slice.length) break
+          count += 1
+        }
+        return Buffer.from(lines.slice(first, first + count).map((line) => `${line}\n`).join(''), 'utf8')
       }
 
       // Sanity: the mock really does chain, or this test proves nothing.
+      // One frame in, one frame out; the whole tail in, every frame out.
+      expect(chaining(bytes.subarray(0, frames[0]?.length ?? 0)).toString('utf8').split('\n').filter(Boolean)).toHaveLength(1)
       expect(chaining(bytes).toString('utf8').split('\n').filter(Boolean)).toHaveLength(5)
 
       const text = decodeFrames(bytes, chaining)
