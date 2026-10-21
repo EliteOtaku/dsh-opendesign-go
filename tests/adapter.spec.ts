@@ -561,6 +561,15 @@ describe('OpenDesignAdapter image dispatch', () => {
     expect(content).toContain('image omitted')
   })
 
+  /** Every wire message a stub captured, in order. */
+  const wireMessages = (
+    fetchMock: ReturnType<typeof stubFetch>,
+  ): { role: string, content: unknown }[] => {
+    const init = fetchMock.mock.calls[0]![1]
+    const body = JSON.parse(String(init.body)) as { messages: { role: string, content: unknown }[] }
+    return body.messages
+  }
+
   it('sends image bytes carried by a tool result', async () => {
     // `read_image` answers with the bytes it read, so the image lands in a tool
     // message rather than a user turn. Projecting that message without a
@@ -597,6 +606,155 @@ describe('OpenDesignAdapter image dispatch', () => {
         },
       ],
     }))
-    expect(wireContent(fetchMock)).toEqual([{ type: 'image_url', image_url: { url } }])
+    const messages = wireMessages(fetchMock)
+    // The tool message itself stays text-only: an intermediary that rebuilds tool
+    // content as a string would drop an image placed there, which is exactly the
+    // failure the following user message avoids.
+    expect(messages.at(-2)).toEqual({ role: 'tool', tool_call_id: 'call_1', content: '' })
+    expect(messages.at(-1)).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: '(Image content from the preceding tool result.)' },
+        { type: 'image_url', image_url: { url } },
+      ],
+    })
+  })
+
+  it('keeps parallel tool results adjacent to each other', async () => {
+    // One assistant turn can issue several calls, and their results arrive as a
+    // run of `tool` messages. Inserting the lifted images after the first result
+    // would split that run, and a gateway that validates call/result pairing
+    // rejects the request outright — a regression no image test would catch.
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '看到' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const first = 'data:image/png;base64:AAAA'
+    const second = 'data:image/png;base64:BBBB'
+    const queue = [first, second]
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => queue.shift(),
+    })
+    await collect(adapter.stream({
+      provider: 'dsh-opendesign-go',
+      model: MODEL,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '读这两张图' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool-call', id: 'call_1', name: 'read_image', arguments: '{"path":"a.png"}' },
+            { type: 'tool-call', id: 'call_2', name: 'read_image', arguments: '{"path":"b.png"}' },
+          ] as unknown as ContentBlock[],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'call_1',
+          content: [{ type: 'image', attachment: { attachmentId: 'sha256:aa' } } as unknown as ContentBlock],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'call_2',
+          content: [{ type: 'image', attachment: { attachmentId: 'sha256:bb' } } as unknown as ContentBlock],
+        },
+      ],
+    }))
+    const messages = wireMessages(fetchMock)
+    expect(messages.map((row) => row.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'user'])
+    expect(messages.at(-1)!.content).toEqual([
+      { type: 'text', text: '(Image content from the preceding tool result.)' },
+      { type: 'image_url', image_url: { url: first } },
+      { type: 'image_url', image_url: { url: second } },
+    ])
+  })
+
+  it('keeps tool text and lifts only the images out of it', async () => {
+    // A tool result usually carries both: the path it read and the bytes. The
+    // path stays on the tool message where the model expects it, and only the
+    // pictures move.
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '看到' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const url = 'data:image/jpeg;base64:BBBB'
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => url,
+    })
+    await collect(adapter.stream({
+      provider: 'dsh-opendesign-go',
+      model: MODEL,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '读一下这张图' }] },
+        {
+          role: 'assistant',
+          content: [{
+            type: 'tool-call',
+            id: 'call_1',
+            name: 'read_image',
+            arguments: '{"path":"a.jpg"}',
+          } as unknown as ContentBlock],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'call_1',
+          content: [
+            { type: 'text', text: '<path>a.jpg</path>' },
+            { type: 'image', attachment: { attachmentId: 'sha256:bb' } } as unknown as ContentBlock,
+          ],
+        },
+      ],
+    }))
+    const messages = wireMessages(fetchMock)
+    expect(messages.at(-2)).toEqual({
+      role: 'tool',
+      tool_call_id: 'call_1',
+      content: '<path>a.jpg</path>',
+    })
+    expect(messages.at(-1)).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: '(Image content from the preceding tool result.)' },
+        { type: 'image_url', image_url: { url } },
+      ],
+    })
+  })
+
+  it('sends no extra user turn when a tool result has no image', async () => {
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '看到' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => 'data:image/jpeg;base64:BBBB',
+    })
+    await collect(adapter.stream({
+      provider: 'dsh-opendesign-go',
+      model: MODEL,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '读一下这张图' }] },
+        {
+          role: 'assistant',
+          content: [{
+            type: 'tool-call',
+            id: 'call_1',
+            name: 'read_image',
+            arguments: '{"path":"a.jpg"}',
+          } as unknown as ContentBlock],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'call_1',
+          content: [{ type: 'text', text: '<path>a.jpg</path>' }],
+        },
+      ],
+    }))
+    const messages = wireMessages(fetchMock)
+    expect(messages.map((row) => row.role)).toEqual(['user', 'assistant', 'tool'])
   })
 })

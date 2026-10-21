@@ -22,6 +22,15 @@ export interface RouteDiagnostics {
     readonly lastError?: string;
     /** How many models the adapter advertises. */
     readonly modelCount: number;
+    /**
+     * Whether the host's attachment store was visible when this snapshot was taken.
+     *
+     * An image cannot become bytes without it, and the resulting request is
+     * indistinguishable from a healthy one until the model reports it cannot see
+     * the picture. Publishing the answer here turns a silent degradation into a
+     * fact the settings page can show.
+     */
+    readonly attachmentsMounted?: boolean;
     /** When this snapshot was taken, ISO timestamp. */
     readonly asOf: string;
 }

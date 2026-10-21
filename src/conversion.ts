@@ -175,45 +175,87 @@ function assistantMessage(
 }
 
 /**
+ * Text that introduces images lifted out of a tool result.
+ *
+ * It states what the pictures are so the model does not read them as something
+ * the user attached in a new turn.
+ */
+const HOISTED_TOOL_IMAGES_NOTE = '(Image content from the preceding tool result.)'
+
+/**
+ * Move a tool result's images into a following user message.
+ *
+ * Chat Completions has no agreed shape for non-text parts on the `tool` role:
+ * the gateway here accepts them, but intermediaries on the way routinely
+ * rebuild tool content as a plain string and lose the pictures silently — the
+ * model then answers about a file it cannot see. A `user` message carries
+ * `image_url` parts reliably everywhere, so the bytes ride there and the tool
+ * message keeps its text.
+ *
+ * @param images - inline data URLs lifted from one tool result.
+ * @returns the user message carrying them, in the same order.
+ */
+function hoistedImages(images: readonly string[]): ChatMessage {
+  const parts: (ChatTextPart | ChatImagePart)[] = [
+    { type: 'text', text: HOISTED_TOOL_IMAGES_NOTE },
+  ]
+  for (const url of images) parts.push({ type: 'image_url', image_url: { url } })
+  return { role: 'user', content: parts }
+}
+
+/** One projected request message, plus the images that must follow it. */
+interface Projection {
+  readonly wire: ChatMessage
+  /** Images lifted out of a tool result; always empty for other roles. */
+  readonly hoisted: readonly string[]
+}
+
+/**
  * Project one request message onto a Chat Completions message.
  * @param message - harness request message.
  * @param resolveImage - route image resolver, absent for text-only routes.
- * @returns the wire message, or undefined when it would carry nothing.
+ * @returns the wire message and any images to append after it, or undefined
+ * when the message would carry nothing.
  */
 function toChatMessage(
   message: RequestMessage,
   resolveImage: ImageDataUrlResolver | undefined,
-): ChatMessage | undefined {
+): Projection | undefined {
   switch (message.role) {
     case 'system': {
       const text = partsOf(message.content, undefined).text
       // `''` records "no system prompt"; an empty system message is rejected by
       // strict gateways, so it is not sent at all.
-      return text === '' ? undefined : { role: 'system', content: text }
+      return text === '' ? undefined : { wire: { role: 'system', content: text }, hoisted: [] }
     }
     case 'developer': {
       // Tool additions/removals only matter to deferred declarations (M6); the
       // remaining text is system-level guidance and keeps that meaning.
       const text = partsOf(message.content, undefined).text
-      return text === '' ? undefined : { role: 'system', content: text }
+      return text === '' ? undefined : { wire: { role: 'system', content: text }, hoisted: [] }
     }
     case 'user': {
       const { text, images } = partsOf(message.content, resolveImage)
       // An image-only turn is legal: it carries no text but still says something.
       if (text === '' && images.length === 0) return undefined
-      return { role: 'user', content: contentOf(text, images) }
+      return { wire: { role: 'user', content: contentOf(text, images) }, hoisted: [] }
     }
-    case 'assistant':
-      return assistantMessage(message.content, resolveImage)
+    case 'assistant': {
+      const wire = assistantMessage(message.content, resolveImage)
+      return wire === undefined ? undefined : { wire, hoisted: [] }
+    }
     case 'tool': {
       // A tool result may carry an image: `read_image` answers with the bytes it
-      // read, and that reply is a tool message. The gateway accepts image parts
-      // on the `tool` role as long as the request also declares `tools`, which is
-      // what the harness always sends alongside a replayed call. Dropping the
-      // resolver here is what turned every tool-side image into placeholder text.
+      // read, and that reply is a tool message. Its pictures are lifted into the
+      // next turn rather than sent on the `tool` role — see {@link hoistedImages}.
+      // Dropping the resolver here entirely is what once turned every tool-side
+      // image into placeholder text.
       const { text, images } = partsOf(message.content, resolveImage)
       // A tool message answers a call, so it is always sent even when empty.
-      return { role: 'tool', tool_call_id: message.toolCallId, content: contentOf(text, images) }
+      return {
+        wire: { role: 'tool', tool_call_id: message.toolCallId, content: text },
+        hoisted: images,
+      }
     }
   }
 }
@@ -241,10 +283,27 @@ export function toChatMessages(
   resolveImage?: ImageDataUrlResolver,
 ): unknown[] {
   const messages: ChatMessage[] = []
+  // One assistant turn may issue several tool calls, whose results arrive as a
+  // run of consecutive `tool` messages. Those must stay adjacent: a message
+  // wedged between them breaks the call/result pairing that strict gateways
+  // validate. So the lifted images are collected for the whole run and emitted
+  // once, right after the last result.
+  let lifted: string[] = []
+  const flushLifted = (): void => {
+    if (lifted.length === 0) return
+    messages.push(hoistedImages(lifted))
+    lifted = []
+  }
   for (const message of options.messages) {
     const converted = toChatMessage(message, resolveImage)
-    if (converted !== undefined) messages.push(converted)
+    if (converted === undefined) continue
+    if (converted.wire.role !== 'tool') flushLifted()
+    messages.push(converted.wire)
+    // Images a tool result handed back ride in a user message after the run,
+    // because that is the one place every hop in the chain preserves them.
+    if (converted.hoisted.length > 0) lifted.push(...converted.hoisted)
   }
+  flushLifted()
 
   const system = options.system
   if (system !== undefined && system.trim() !== '') {

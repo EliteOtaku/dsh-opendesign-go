@@ -537,6 +537,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       triedRef,
       ...(lastError === undefined ? {} : { lastError }),
       modelCount: listSeedModels(PROVIDER_ID).length,
+      attachmentsMounted: attachments !== undefined,
       asOf: new Date().toISOString(),
     }
     const { asOf: _asOf, ...facts } = payload
