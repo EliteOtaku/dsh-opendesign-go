@@ -505,6 +505,16 @@ describe('OpenDesignAdapter.resolveModel', () => {
     expect(resolved.defaultMaxTokens).toBeUndefined()
     expect(resolved.inputModalities).toBeUndefined()
   })
+
+  it('reports the input budget, not the advertised window', async () => {
+    // The provider checks `input + max_tokens` against the window while the
+    // harness only ever measures input. Reporting the advertised window makes
+    // every compaction decision late by the output reservation, which is how a
+    // conversation at 60% of the window was refused as too long.
+    const resolved = await adapterWith().resolveModel('dsh-opendesign-go', MODEL)
+    expect(resolved.context?.contextWindow).toBe(750_000)
+    expect(resolved.defaultMaxTokens).toBe(250_000)
+  })
 })
 
 describe('OpenDesignAdapter image dispatch', () => {

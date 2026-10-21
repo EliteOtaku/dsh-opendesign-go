@@ -39,6 +39,7 @@ import type {
 import { listSeedModels, seedModel } from './catalog.ts'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS, paramsOf } from './model-params.ts'
 import type { ModelParams } from './model-params.ts'
+import { estimatePromptTokens, fitMaxTokens, reservedOutputTokens, usableInputTokens } from './output-budget.ts'
 import { DISPLAY_NAME, type OpenDesignConfig } from './config-contract.ts'
 import { toChatMessages, toChatTools } from './conversion.ts'
 import type { ImageDataUrlResolver } from './conversion.ts'
@@ -235,8 +236,13 @@ export class OpenDesignAdapter extends LlmAdapter {
       // "this model cannot see images" the reported symptom of a table mismatch.
       ...(params === undefined ? {} : {
         inputModalities: params.inputModalities,
-        context: { contextWindow: params.contextWindow },
-        defaultMaxTokens: params.maxTokens,
+        // The harness compares conversation size against this number and never
+        // subtracts the output reservation, so it is told what input may fill.
+        // Reporting the advertised window here made every compaction decision
+        // late by the reservation, and a conversation at 60% of the window was
+        // still refused by the provider as too long.
+        context: { contextWindow: usableInputTokens(params.contextWindow, params.maxTokens) },
+        defaultMaxTokens: reservedOutputTokens(params.contextWindow, params.maxTokens),
       }),
       reasoning,
     }
@@ -362,11 +368,21 @@ async function dispatch(
   const tools = toChatTools(options)
   if (tools !== undefined) body.tools = tools
   if (options.temperature !== undefined) body.temperature = options.temperature
-  // A caller-provided cap wins; otherwise the model's own `output_budget` is
-  // used, because leaving it to the provider silently caps some models far
-  // below what they advertise.
-  const maxTokens = options.maxTokens ?? paramsOf(options.model, config.modelParams)?.maxTokens
-  if (maxTokens !== undefined) body.max_tokens = maxTokens
+  // A caller-provided cap wins; otherwise the model's own output budget is used,
+  // because leaving the field out lets the provider pick an output size that
+  // overflows the window it just measured the input against.
+  const params = paramsOf(options.model, config.modelParams)
+  const requested = options.maxTokens ?? params?.maxTokens
+  if (requested !== undefined) {
+    // The provider checks input + max_tokens against the window before running
+    // anything, so a large advertised output cap refuses otherwise-valid input.
+    // The reservation is clamped to what is actually left, which is the only way
+    // both "use the model's real output budget" and "accept a long prompt" hold.
+    const fitted = params === undefined
+      ? requested
+      : fitMaxTokens(requested, params.contextWindow, estimatePromptTokens(body.messages as unknown[], tools))
+    if (fitted !== undefined) body.max_tokens = fitted
+  }
   // The gateway honours `reasoning_effort`: the four values change
   // `reasoning_tokens` in the response rather than being ignored.
   if (options.reasoningEffort !== undefined) body.reasoning_effort = options.reasoningEffort

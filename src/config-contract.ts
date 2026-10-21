@@ -19,7 +19,7 @@ export const DISPLAY_NAME = 'OpenDesign Go'
  * a single file with no reliable path back to its own package, and the update
  * check needs a value it can compare without filesystem access.
  */
-export const PLUGIN_VERSION = '0.1.8'
+export const PLUGIN_VERSION = '0.1.9'
 
 /** Settings namespace this plugin installs and the Web page edits. */
 export const SETTINGS_NAMESPACE = 'llm-opendesign-go'
