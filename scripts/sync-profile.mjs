@@ -13,9 +13,19 @@
  * Usage: node scripts/sync-profile.mjs [--profile desktop] [--link]
  */
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, readFileSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -27,6 +37,20 @@ const installed = join(homedir(), '.dsh', 'profiles', profileName, 'node_modules
 /** SHA-256 of one file. */
 function digestOf(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+/** Every file below a directory, as paths relative to it. */
+function filesUnder(directory) {
+  const found = []
+  const walk = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = join(current, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (entry.isFile()) found.push(relative(directory, full))
+    }
+  }
+  walk(directory)
+  return found.sort()
 }
 
 if (!existsSync(installed)) {
@@ -45,21 +69,23 @@ if (useLink) {
   process.exit(0)
 }
 
-const files = ['index.js', 'client.js']
 const failures = []
-for (const name of files) {
-  const source = join(root, 'lib', name)
+
+// Mirror the whole lib/ tree, not just the two entry bundles. The declaration
+// files travel with the runtime: leaving them behind makes the profile describe
+// a different build than the one it runs, which is the exact confusion this
+// script exists to prevent.
+const libRoot = join(root, 'lib')
+for (const name of filesUnder(libRoot)) {
+  const source = join(libRoot, name)
   const target = join(installed, 'lib', name)
-  if (!existsSync(source)) {
-    failures.push(`${name}: missing from lib/`)
-    continue
-  }
+  mkdirSync(dirname(target), { recursive: true })
   // Write to a temporary name first: a partly written bundle is worse than an
   // old one, because the Host may load it during the copy.
   const temp = `${target}.sync`
   copyFileSync(source, temp)
   renameSync(temp, target)
-  if (digestOf(source) !== digestOf(target)) failures.push(`${name}: digest mismatch after copy`)
+  if (digestOf(source) !== digestOf(target)) failures.push(`lib/${name}: digest mismatch after copy`)
 }
 
 for (const name of ['package.json', 'cordis.patch.yml']) {
@@ -77,4 +103,4 @@ if (failures.length > 0) {
 }
 
 const stamp = statSync(join(installed, 'lib', 'index.js')).mtime.toISOString()
-console.log(`sync-profile: ${files.length} bundles verified in ${profileName} (mtime ${stamp})`)
+console.log(`sync-profile: lib/ mirrored (${filesUnder(libRoot).length} files) into ${profileName} (mtime ${stamp})`)
