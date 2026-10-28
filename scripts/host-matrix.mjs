@@ -36,11 +36,16 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
  *
  * The endpoints matter more than the middle: `0.2.0-rc.1` is the lowest
  * version `engines.dsh` allows, and the newest published version is what a
- * fresh install receives. A version in between adds install cost without
- * testing a distinct API surface, because these are release candidates of one
- * line — no removal happened between them.
+ * fresh install receives. Release candidates of one line add install cost
+ * without testing a distinct API surface — no removal happens between them.
+ *
+ * The alpha of the next line is the exception: it is the first build that may
+ * remove something the previous line still had, so it is the only entry here
+ * that can fail while every rc before it passes. `0.2.2-alpha.2` is listed for
+ * that reason. Reaching it needs the peer range to admit a prerelease, which it
+ * does: the host itself checks peers with `includePrerelease: true`.
  */
-const HOSTS = (process.env.HOST_MATRIX_VERSIONS ?? '0.2.0-rc.1,0.2.0-rc.2,0.2.1-rc.2')
+const HOSTS = (process.env.HOST_MATRIX_VERSIONS ?? '0.2.0-rc.1,0.2.0-rc.2,0.2.1-rc.2,0.2.2-alpha.2')
   .split(',')
   .map((v) => v.trim())
   .filter(Boolean)
