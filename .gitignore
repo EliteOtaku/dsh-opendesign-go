@@ -18,6 +18,9 @@ debug/
 npm-debug.log*
 pnpm-debug.log*
 
+# Session panel artifacts written by the DSH host at runtime
+.dsh-ops/
+
 # OS / editor
 .DS_Store
 Thumbs.db
