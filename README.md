@@ -2,7 +2,7 @@
 
 在 DSH 里使用 OpenDesign Go 订阅的 12 个模型：推理走 OpenAI Chat Completions 协议，额度、用量和多账号都在设置页里。
 
-![OpenDesign Go 设置页](docs/images/setup.png)
+![OpenDesign Go 设置页：启用开关、输入框额度开关与账号列表](docs/images/setup.png)
 
 ## 关于作者
 
@@ -78,11 +78,11 @@ CI 有五个作业：Windows 与 Ubuntu 各跑 Node 24 和 22.19，加一个独�
 
 ![输入框额度条](docs/images/composer-usage.png)
 
-订阅额度卡片，两个滚动窗口各自的剩余百分比、剩余金额与已用金额：
+订阅额度卡片：5 小时与 7 天两个滚动窗口各自的剩余百分比、剩余金额、已用金额与外推天数，底部是钱包余额与本周期的两套对账口径：
 
 ![额度卡片](docs/images/quota.png)
 
-可用模型列表，取消勾选即从会话的模型选择器移除，也可逐项改参数：
+可用模型列表：关闭后该模型不再出现在会话的模型选择器里（仍可走 API），右侧「改参数」可逐项覆盖上下文窗口与输出上限：
 
 ![可用模型](docs/images/models.png)
 
