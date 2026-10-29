@@ -1,0 +1,328 @@
+/* Structural styles for the shared primitives. Colours come from the token
+   scope in `tokens.module.css`; nothing here hard-codes a scheme. */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--ods-surface);
+  border: 1px solid var(--ods-border);
+  border-radius: var(--ods-radius);
+  overflow: hidden;
+}
+
+.cardHead {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 2px 12px;
+  padding: 14px 16px 0;
+}
+
+.cardHeading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cardBadge {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ods-text);
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+}
+
+.cardDesc {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ods-text-2);
+}
+
+.cardBody {
+  padding: 12px 16px 16px;
+}
+
+.cardBodyColumns {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+}
+
+.row + .row,
+.divider + .row,
+.row + .divider {
+  border-top: 1px solid var(--ods-border);
+}
+
+.rowTop {
+  align-items: start;
+}
+
+.rowText {
+  min-width: 0;
+}
+
+.rowLabelWrap {
+  min-width: 0;
+  cursor: inherit;
+}
+
+.rowLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ods-text);
+}
+
+.rowHint {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ods-text-2);
+}
+
+.rowControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+  min-width: 0;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+.badgeNeutral {
+  color: var(--ods-text-2);
+  background: var(--ods-surface-2);
+}
+
+.badgeOk {
+  color: var(--ods-ok);
+  background: color-mix(in srgb, var(--ods-ok) 12%, transparent);
+}
+
+.badgeWarn {
+  color: var(--ods-warn);
+  background: color-mix(in srgb, var(--ods-warn) 14%, transparent);
+}
+
+.badgeStop {
+  color: var(--ods-stop);
+  background: color-mix(in srgb, var(--ods-stop) 12%, transparent);
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ods-text-2);
+}
+
+.divider {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--ods-border);
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--ods-surface-3);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.switchOn {
+  background: var(--ods-accent);
+}
+
+.switchThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--dsw-alias-switch-thumb, #ffffff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 120ms ease;
+}
+
+.switchOn .switchThumb {
+  transform: translateX(16px);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--ods-radius-sm);
+  border: 1px solid var(--ods-border);
+  background: transparent;
+  color: var(--ods-text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--ods-hover);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btnPrimary {
+  background: var(--ods-accent);
+  border-color: transparent;
+  color: var(--ods-on-accent);
+}
+
+.btnPrimary:hover:not(:disabled) {
+  background: var(--ods-accent);
+  opacity: 0.88;
+}
+
+.btnDanger {
+  color: var(--ods-stop);
+  border-color: color-mix(in srgb, var(--ods-stop) 35%, transparent);
+}
+
+.btnDanger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ods-stop) 10%, transparent);
+}
+
+.bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ods-surface-3);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 200ms ease;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.statLabel {
+  font-size: 11px;
+  color: var(--ods-text-2);
+}
+
+.statValue {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--ods-text);
+}
+
+.statHint {
+  font-size: 11px;
+  color: var(--ods-text-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  color: var(--ods-text-3);
+}
+
+.fieldHint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ods-text-3);
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ods-text);
+  background: var(--ods-sunken);
+  border: 1px solid var(--ods-border);
+  border-radius: var(--ods-radius-sm);
+}
+
+.input::placeholder {
+  color: var(--ods-text-3);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--ods-accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+/* A description may hold several lines; each one stacks instead of running
+   together, because `<p>` cannot legally contain a `<div>`. */
+.cardDesc > span {
+  display: block;
+}
+
+.cardDesc > span + span {
+  margin-top: 5px;
+}

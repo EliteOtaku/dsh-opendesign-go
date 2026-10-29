@@ -137,6 +137,70 @@ describe('OpenDesignAdapter.stream', () => {
     ])
   })
 
+  it('reads reasoning under the gateway spellings that are not reasoning_content', async () => {
+    // Reported as issue #2: OpenDesign sends `reasoning`, not `reasoning_content`.
+    // Reading only the latter left the thought block unopened.
+    stubFetch(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: 'We' }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: ' need' }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    const chunks = await collect(adapterWith().stream(request()))
+
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      { type: 'reasoning-delta', index: 0, text: 'We' },
+      { type: 'reasoning-delta', index: 0, text: ' need' },
+      { type: 'block-start', index: 1, blockType: 'text' },
+      { type: 'text-delta', index: 1, text: 'ok' },
+      { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'We need' } },
+      { type: 'block-end', index: 1, block: { type: 'text', text: 'ok' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+  })
+
+  it('falls back to reasoning_details, and never reports the same text twice', async () => {
+    // OpenDesign sends the increment as `reasoning` *and* mirrors it into
+    // `reasoning_details`; treating them as additive would double every word.
+    stubFetch(
+      sse([
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            delta: { reasoning: 'We', reasoning_details: [{ type: 'reasoning.text', text: 'We' }] },
+            finish_reason: null,
+          }],
+        }),
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            delta: { reasoning_details: [{ type: 'reasoning.text', text: ' need' }] },
+            finish_reason: null,
+          }],
+        }),
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    const chunks = await collect(adapterWith().stream(request()))
+
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      { type: 'reasoning-delta', index: 0, text: 'We' },
+      { type: 'reasoning-delta', index: 0, text: ' need' },
+      { type: 'block-start', index: 1, blockType: 'text' },
+      { type: 'text-delta', index: 1, text: 'ok' },
+      { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'We need' } },
+      { type: 'block-end', index: 1, block: { type: 'text', text: 'ok' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+  })
+
   it('accumulates tool call deltas into one tool-call block', async () => {
     stubFetch(
       sse([

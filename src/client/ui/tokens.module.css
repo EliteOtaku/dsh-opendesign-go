@@ -1,0 +1,29 @@
+/**
+ * Theme bridge: maps this plugin's variables onto the Host's alias tokens.
+ *
+ * Applied to the outermost element of each surface (the settings page and the
+ * composer pill), so every descendant inherits one coherent palette and both
+ * surfaces follow the user's light/dark/accent choice for free. Nothing here
+ * persists state: the Host already owns the theme.
+ */
+.scope {
+  --ods-surface: var(--dsw-alias-bg-layer-2, #ffffff);
+  --ods-surface-2: var(--dsw-alias-bg-layer-3, #f1f3f6);
+  --ods-surface-3: var(--dsw-alias-bg-layer-4, #e8ebef);
+  --ods-sunken: var(--dsw-alias-bg-layer-1, #f6f7f9);
+  --ods-border: var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+  --ods-border-strong: var(--dsw-alias-border-l4, rgba(0, 0, 0, 0.2));
+  --ods-text: var(--dsw-alias-label-primary, #1f2328);
+  --ods-text-2: var(--dsw-alias-label-secondary, #6e7781);
+  --ods-text-3: var(--dsw-alias-label-tertiary, #98a1ab);
+  --ods-accent: var(--dsw-alias-brand-primary, #4f6bed);
+  --ods-on-accent: var(--dsw-alias-label-primary-inverted, #ffffff);
+  --ods-hover: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.1));
+  --ods-ok: var(--dsw-alias-state-success-primary, #1a7f37);
+  --ods-warn: var(--dsw-alias-state-warn-primary, #9a6700);
+  --ods-stop: var(--dsw-alias-state-error-primary, #cf222e);
+  --ods-link: var(--dsw-alias-link, #0969da);
+  --ods-radius: 12px;
+  --ods-radius-sm: 8px;
+  color: var(--ods-text);
+}

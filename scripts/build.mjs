@@ -16,6 +16,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statS
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wrapClientModule } from './client-envelope.mjs'
+import { cssModulesPlugin } from './css-modules.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const check = process.argv.includes('--check')
@@ -75,6 +76,9 @@ if (existsSync(clientEntry)) {
     sourcemap: false,
     logLevel: 'warning',
     write: false,
+    // Stylesheets compile into the bundle as injected <style> tags; a plugin
+    // cannot link a separate CSS file from the module loader envelope.
+    plugins: [cssModulesPlugin({ root, pkg: pkg.name })],
   })
   const body = cjs.outputFiles[0]?.text
   if (body === undefined) throw new Error('client bundle produced no output')

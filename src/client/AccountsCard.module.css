@@ -1,0 +1,96 @@
+/**
+ * Account list rows and the two inline forms (add an account, replace a key).
+ */
+
+.accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--ods-border);
+  border-radius: var(--ods-radius-sm);
+}
+
+/* The active account is the one every request uses, so it reads as selected. */
+.accountActive {
+  border-color: color-mix(in srgb, var(--ods-accent) 55%, var(--ods-border));
+  background: color-mix(in srgb, var(--ods-accent) 7%, transparent);
+}
+
+.accountTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.accountMain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.accountText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.accountName {
+  font-size: 13px;
+  color: var(--ods-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountEnv {
+  font-size: 11px;
+  color: var(--ods-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountActions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+}
+
+.error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ods-stop);
+}
+
+.notice {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ods-text-2);
+}
+
+.cap {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ods-text-3);
+}

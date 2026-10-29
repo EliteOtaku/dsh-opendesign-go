@@ -66,6 +66,7 @@ export const PlainConfig: z<OpenDesignConfig> = z.object({
   apiKeyEnv: z.string().default(DEFAULT_API_KEY_ENV),
   accounts: AccountsSchema,
   autoSwitch: z.boolean().default(false),
+  composerUsage: z.boolean().default(true),
   sessionRef: z.string().default(''),
   workspaceId: z.string().default(''),
   usageJson: z.string().default(''),
@@ -103,6 +104,7 @@ export const Config = z.object({
   apiKeyEnv: z.string().default(DEFAULT_API_KEY_ENV).volatile(),
   accounts: AccountsSchema.volatile(),
   autoSwitch: z.boolean().default(false).volatile(),
+  composerUsage: z.boolean().default(true).volatile(),
   sessionRef: z.string().default('').volatile(),
   workspaceId: z.string().default('').volatile(),
   usageJson: z.string().default('').volatile(),
@@ -138,6 +140,8 @@ export interface LiveConfig {
   readonly accounts: { get(): readonly OpenDesignAccount[] }
   /** Try the next account after a credential rejection. */
   readonly autoSwitch: { get(): boolean }
+  /** Whether the composer shows the quota pill. */
+  readonly composerUsage: { get(): boolean }
   /** Credential reference of the console session; empty when the channel is off. */
   readonly sessionRef: { get(): string }
   /** Console workspace id used when the selected account declares none. */
@@ -185,6 +189,7 @@ export function readConfig(config: LiveConfig): OpenDesignConfig {
     apiKeyEnv: config.apiKeyEnv.get(),
     accounts: accountsOfConfig(config.accounts.get()),
     autoSwitch: config.autoSwitch.get(),
+    composerUsage: config.composerUsage.get(),
     sessionRef: config.sessionRef.get(),
     workspaceId: config.workspaceId.get(),
     usageJson: config.usageJson.get(),

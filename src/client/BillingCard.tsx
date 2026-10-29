@@ -15,6 +15,8 @@ import type { ReactElement } from 'react'
 import type { PlanSpec } from '../plans.ts'
 import { creditsToNumber } from '../usage-contract.ts'
 import type { QuotaWindow, UsageSnapshot } from '../usage-contract.ts'
+import { Button, Card } from './ui/primitives.tsx'
+import styles from './BillingCard.module.css'
 
 /**
  * Length of the allowance window a monthly figure is comparable to.
@@ -95,23 +97,11 @@ export function BillingCard({ snapshot, plan, measuredUsd, baseline, onAlign, ed
   // with it would invite reading it as the bill.
   const [costOpen, setCostOpen] = useState(false)
 
-  const card = {
-    border: '1px solid rgba(128, 128, 128, 0.25)',
-    borderRadius: '10px',
-    padding: '14px 16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  } as const
-  const hint = { fontSize: '12px', opacity: 0.6, margin: 0 } as const
-  const divider = { borderTop: '1px solid rgba(128,128,128,0.18)', paddingTop: '10px' } as const
-
   if (snapshot === undefined) {
     return (
-      <div style={card}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>套餐对账</div>
-        <p style={hint}>尚未读取额度，无法对账。</p>
-      </div>
+      <Card title="套餐对账">
+        <p className={styles.note}>尚未读取额度，无法对账。</p>
+      </Card>
     )
   }
 
@@ -136,91 +126,62 @@ export function BillingCard({ snapshot, plan, measuredUsd, baseline, onAlign, ed
     : Math.round((monthlySpent / plan.monthlyCapUsd) * 100)
 
   return (
-    <div style={card}>
-      {plan !== undefined && monthly !== undefined && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
-            月总额度 {usd(monthlySpent)} / {usd(plan.monthlyCapUsd)}
-            {percent !== undefined && `（${percent}%）`}
-          </div>
-          {projected !== undefined && (
-            <div style={{ fontSize: '11px', opacity: 0.55 }}>
-              按当前速率外推，整月约 {usd(projected)}
-              {plan.monthlyCapUsd > 0 && `（相当于月额度的 ${Math.round(projected / plan.monthlyCapUsd * 100)}%）`}
-              <span style={{ opacity: 0.9 }}>
-                {' '}— 外推值，仅作参考
+    <Card
+      title="套餐对账"
+      description="官方宣传额度与插件实测成本分开列，二者口径不同。"
+    >
+      <div className={styles.block}>
+        {plan !== undefined && monthly !== undefined && (
+          <>
+            <span className={styles.allowance}>
+              月总额度 {usd(monthlySpent)} / {usd(plan.monthlyCapUsd)}
+              {percent !== undefined && `（${percent}%）`}
+            </span>
+            {projected !== undefined && (
+              <span className={styles.note}>
+                按当前速率外推，整月约 {usd(projected)}
+                {plan.monthlyCapUsd > 0 && `（相当于月额度的 ${Math.round(projected / plan.monthlyCapUsd * 100)}%）`}
+                <span style={{ opacity: 0.85 }}>{' '}— 外推值，仅作参考</span>
               </span>
-            </div>
-          )}
-          <div style={{ fontSize: '11px', opacity: 0.55 }}>
-            月总额度是官方宣传值，实际约束是上方窗口：Go 每周 $15，四周合计约 $60，
-            因此 $120 的月额度按周口径用不满
-          </div>
-        </div>
-      )}
+            )}
+            <span className={styles.note}>
+              月总额度是官方宣传值，实际约束是上方窗口：Go 每周 $15，四周合计约 $60，
+              因此 $120 的月额度按周口径用不满
+            </span>
+          </>
+        )}
+      </div>
 
-      <div style={{ ...divider, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <div className={styles.divider}>
         {baseline === undefined ? (
-          <button
-            type="button"
+          <Button
             // Disabled rather than hidden: an unavailable control still tells the
             // user the feature exists and is gated, which a missing button cannot.
             disabled={onAlign === undefined || !editable}
             onClick={onAlign === undefined ? undefined : () => onAlign()}
-            style={{
-              alignSelf: 'flex-start',
-              padding: '5px 10px',
-              borderRadius: '6px',
-              border: '1px solid rgba(128, 128, 128, 0.35)',
-              background: 'transparent',
-              color: 'inherit',
-              fontSize: '12px',
-              cursor: onAlign === undefined || !editable ? 'not-allowed' : 'pointer',
-              opacity: onAlign === undefined || !editable ? 0.5 : 1,
-            }}
           >
             对齐当前周期
-          </button>
+          </Button>
         ) : (
           <AlignmentSummary baseline={baseline} monthly={monthly} snapshot={snapshot} measuredUsd={measuredUsd} />
         )}
       </div>
 
-      <div style={divider}>
-        <button
-          type="button"
-          onClick={() => setCostOpen((open) => !open)}
-          aria-expanded={costOpen}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            width: '100%',
-            padding: 0,
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            fontSize: '12px',
-            opacity: 0.75,
-            cursor: 'pointer',
-            textAlign: 'left',
-          }}
-        >
-          <span>{costOpen ? '▾' : '▸'}</span>
+      <div className={styles.divider}>
+        <button type="button" className={styles.disclosure} onClick={() => setCostOpen((open) => !open)} aria-expanded={costOpen}>
+          <span className={styles.chevron}>{costOpen ? '▾' : '▸'}</span>
           <span>等价 API 成本（仅供参考）</span>
         </button>
         {costOpen && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
-            <div style={{ fontSize: '12px', fontVariantNumeric: 'tabular-nums' }}>
-              实测 {measuredUsd === undefined ? '暂无数据' : `$${measuredUsd.toFixed(4)}`}
-            </div>
-            <div style={{ fontSize: '11px', opacity: 0.6, lineHeight: 1.5 }}>
+          <div className={styles.cost}>
+            <span>实测 {measuredUsd === undefined ? '暂无数据' : `$${measuredUsd.toFixed(4)}`}</span>
+            <span className={styles.note}>
               按各厂商公开单价估算；套餐按 credits 计费且缓存输入占比不同，此值仅供参考，不代表账单。
-            </div>
+            </span>
           </div>
         )}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -249,12 +210,12 @@ function AlignmentSummary({ baseline, monthly, snapshot, measuredUsd }: {
     ? planUsd / measuredDelta
     : undefined
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '12px', fontVariantNumeric: 'tabular-nums' }}>
-      <div style={{ opacity: 0.7 }}>自 {alignedAtText(baseline.at)} 起的增量</div>
-      <div>
+    <div className={styles.aligned}>
+      <span className={styles.alignedAt}>自 {alignedAtText(baseline.at)} 起的增量</span>
+      <span>
         套餐 {usd(planUsd)} · 实测 {usd(measuredDelta)}
-        {ratio !== undefined && <span style={{ opacity: 0.7 }}>{` · 比值 ${ratio.toFixed(1)}`}</span>}
-      </div>
+        {ratio !== undefined && <span className={styles.alignedAt}>{` · 比值 ${ratio.toFixed(1)}`}</span>}
+      </span>
     </div>
   )
 }

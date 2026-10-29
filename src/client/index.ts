@@ -11,13 +11,29 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the shell's SlotMap merge (the 'settings.section' entry).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// Type-only: pulls the conversation's SlotMap merge ('conversation.input.right').
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the slot registry Context merge (ctx.slots).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+// Type-only: pulls the model-selection Context merge (ctx.modelDirectories) and
+// the session model directory state the pill gates on.
+import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { DISPLAY_NAME, PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
 import { accountCommands } from './accounts-controller.ts'
 import { OpenDesignSection } from './Section.tsx'
 import type { OpenDesignSectionInjected } from './Section.tsx'
+import { ComposerUsagePill } from './UsagePill.tsx'
+import type { ComposerUsageInjected } from './UsagePill.tsx'
+
+/**
+ * Session identity as the model directory resolver expects it.
+ *
+ * The slot hands the registrant a plain string; the resolver takes its own
+ * branded id. The value is the same session id the shell just passed in, so the
+ * cast is a type-level fact rather than a conversion.
+ */
+type DirectorySession = Parameters<ClientContext['modelDirectories']['directoryFor']>[0]
 
 /**
  * Required services. `configForms` owns the entry's config transport; `slots`
@@ -59,5 +75,42 @@ export function apply(ctx: ClientContext): void {
       label: () => DISPLAY_NAME,
       inject: injected,
     }, OpenDesignSection)))
+    // Quota where it is spent: the composer's own tool row, before the submit
+    // action. Same `form`, so the pill reads the reading the page already has
+    // and needs no transport of its own. `order` leaves room for other plugins
+    // to sit closer to the submit button.
+    //
+    // Two conditions gate the pill, and both are correctness, not taste:
+    // it only speaks for this provider's quota, so it appears only while this
+    // provider's model is the session's selection (the reference plugin shares
+    // the same tool row, and two quota pills side by side would be a lie about
+    // whose credits are being spent); and it needs the session's model
+    // directory to know that, which is a separate service that must not be a
+    // requirement for the settings page.
+    //
+    // The slot name belongs to another plugin (the conversation shell), so a
+    // failure here must not take the settings page down with it: the page is
+    // the only way to fix a broken configuration, and losing it because an
+    // optional surface is absent would be the wrong trade.
+    ready.inject(['modelDirectories'], (models) => {
+      const pillInjected = (sessionId: string): ComposerUsageInjected => ({
+        form,
+        directory: models.modelDirectories.directoryFor(sessionId as DirectorySession).store,
+      })
+      models.effect(() => {
+        try {
+          return models.slots.inject('conversation.input.right', () => models.slots.register({
+            name: 'conversation.input.right',
+            id: `${PROFILE_ENTRY_ID}-usage`,
+            order: 100,
+            label: () => DISPLAY_NAME,
+            inject: pillInjected,
+          }, ComposerUsagePill))
+        } catch (error: unknown) {
+          console.error('llm-opendesign-go: could not register the composer usage pill', error)
+          return () => {}
+        }
+      })
+    })
   })
 }

@@ -29,29 +29,8 @@ import {
   parseModelParams,
 } from '../model-params.ts'
 import { usableInputTokens } from '../output-budget.ts'
-
-const card = {
-  border: '1px solid rgba(128, 128, 128, 0.25)',
-  borderRadius: '10px',
-  padding: '14px 16px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '12px',
-} as const
-
-const hint = { fontSize: '13px', opacity: 0.65, margin: 0 } as const
-
-const input = {
-  width: '100%',
-  padding: '3px 6px',
-  fontSize: '12px',
-  fontVariantNumeric: 'tabular-nums' as const,
-  borderRadius: '5px',
-  border: '1px solid rgba(128, 128, 128, 0.3)',
-  background: 'transparent',
-  color: 'inherit',
-  boxSizing: 'border-box' as const,
-}
+import { Button, Card, Field, Input, Switch, cx } from './ui/primitives.tsx'
+import styles from './ModelsCard.module.css'
 
 /** Compact token count, e.g. 1048000 → 1.05M. */
 function tokens(value: number): string {
@@ -170,66 +149,48 @@ export function ModelsCard({ form, config, editable }: {
   }
 
   return (
-    <div style={card}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>可用模型</div>
-        <span style={{ fontSize: '12px', opacity: 0.6 }}>{GO_DESIGN_PLAN_MODELS.length} 个</span>
-      </div>
-      <p style={hint}>
-        取消勾选后该模型不再出现在会话的模型选择器里，但仍可用 API 直接调用。
-        参数默认值取自各厂商公布的模型规格，留空即沿用。
-      </p>
-      <p style={hint}>
-        可用输入 = 上下文 − max(输出上限, 上下文/4)。网关按「输入 + max_tokens ≤ 上下文」判超限，
-        而会话界面只量输入，把这个差额算进去才不会在长对话里突然被拒。
-      </p>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+    <Card
+      title="可用模型"
+      actions={<span className={styles.cap}>{GO_DESIGN_PLAN_MODELS.length} 个</span>}
+      description={(
+        <>
+          <span>
+            关闭后该模型不再出现在会话的模型选择器里，但仍可用 API 直接调用。参数默认值取自各厂商公布的模型规格，留空即沿用。
+          </span>
+          <span>
+            可用输入 = 上下文 − max(输出上限, 上下文/4)。网关按「输入 + max_tokens ≤ 上下文」判超限，
+            而会话界面只量输入，把这个差额算进去才不会在长对话里突然被拒。
+          </span>
+        </>
+      )}
+    >
+      <div className={styles.list}>
         {GO_DESIGN_PLAN_MODELS.map((model) => {
           const base = MODEL_DEFAULTS[model.id]
           const override = overrides[model.id]
           const context = override?.contextWindow ?? base?.contextWindow
           const max = override?.maxTokens ?? base?.maxTokens
           const isEditing = editing === model.id
+          const on = isModelEnabled(model.id, enabled)
           return (
-            <div
-              key={model.id}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-                padding: '7px 0',
-                borderTop: '1px solid rgba(128, 128, 128, 0.14)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: 0 }}>
-                  <input
-                    type="checkbox"
-                    checked={isModelEnabled(model.id, enabled)}
-                    disabled={!editable}
-                    onChange={() => { toggle(model.id) }}
-                    aria-label={`在模型列表中${isModelEnabled(model.id, enabled) ? '停用' : '启用'} ${model.name}`}
-                    style={{ marginTop: '3px', cursor: editable ? 'pointer' : 'default' }}
-                  />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '13px', opacity: isModelEnabled(model.id, enabled) ? 1 : 0.5 }}>{model.name}</div>
-                    <div style={{ fontSize: '11px', opacity: 0.55 }}>{model.id}</div>
+            <div key={model.id} className={cx(styles.model, !on && styles.modelOff)}>
+              <div className={styles.modelTop}>
+                <div className={styles.modelMain}>
+                  <Switch checked={on} disabled={!editable} onChange={() => { toggle(model.id) }} label={`在模型列表中${on ? '停用' : '启用'} ${model.name}`} />
+                  <div className={styles.modelText}>
+                    <span className={styles.modelName}>{model.name}</span>
+                    <span className={styles.modelId}>{model.id}</span>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-                  <span style={{ fontSize: '11px', opacity: 0.7, fontVariantNumeric: 'tabular-nums' }}>
+                <div className={styles.modelSide}>
+                  <span className={styles.modelMeta}>
                     上下文 {context === undefined ? '未知' : tokens(context)}
-                    {context !== undefined && max !== undefined
-                      ? `（可用输入 ${tokens(usableInputTokens(context, max))}）`
-                      : ''}
+                    {context !== undefined && max !== undefined ? `（可用输入 ${tokens(usableInputTokens(context, max))}）` : ''}
                     {' · '}输出 {max === undefined ? '未知' : tokens(max)}
-                    {override !== undefined && <span style={{ marginLeft: '4px', opacity: 0.8 }}>（已改）</span>}
+                    {override !== undefined && <span className={styles.edited}>（已改）</span>}
                   </span>
-                  <button
-                    type="button"
+                  <Button
                     disabled={!editable}
-                    style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '5px', border: '1px solid rgba(128,128,128,0.35)', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
                     onClick={() => {
                       if (isEditing) {
                         setEditing(undefined)
@@ -247,45 +208,33 @@ export function ModelsCard({ form, config, editable }: {
                     }}
                   >
                     {isEditing ? '取消' : '改参数'}
-                  </button>
+                  </Button>
                 </div>
               </div>
 
               {isEditing && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '4px' }}>
-                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                    <label style={{ fontSize: '11px', opacity: 0.75, flex: '1 1 150px' }}>
-                      上下文窗口
-                      <input
+                <div className={styles.editor}>
+                  <div className={styles.editorRow}>
+                    <Field label="上下文窗口">
+                      <Input
                         type="number"
                         value={draftContext}
                         placeholder={base?.contextWindow === undefined ? '' : String(base.contextWindow)}
-                        onChange={(event) => { setDraftContext(event.target.value) }}
-                        style={input}
+                        onChange={setDraftContext}
                       />
-                    </label>
-                    <label style={{ fontSize: '11px', opacity: 0.75, flex: '1 1 150px' }}>
-                      输出上限 max_tokens
-                      <input
+                    </Field>
+                    <Field label="输出上限 max_tokens">
+                      <Input
                         type="number"
                         value={draftMax}
                         placeholder={base?.maxTokens === undefined ? '' : String(base.maxTokens)}
-                        onChange={(event) => { setDraftMax(event.target.value) }}
-                        style={input}
+                        onChange={setDraftMax}
                       />
-                    </label>
+                    </Field>
                   </div>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <button
-                      type="button"
-                      style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '5px', border: '1px solid rgba(128,128,128,0.35)', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
-                      onClick={() => { save(model.id) }}
-                    >
-                      保存
-                    </button>
-                    <span style={{ fontSize: '11px', opacity: 0.55, alignSelf: 'center' }}>
-                      两项都留空 = 恢复官方值
-                    </span>
+                  <div className={styles.editorFoot}>
+                    <Button variant="primary" onClick={() => { save(model.id) }}>保存</Button>
+                    <span className={styles.cap}>两项都留空 = 恢复官方值</span>
                   </div>
                 </div>
               )}
@@ -294,8 +243,8 @@ export function ModelsCard({ form, config, editable }: {
         })}
       </div>
 
-      {error !== undefined && <p style={{ ...hint, color: '#e5484d' }}>{error}</p>}
-      {notice !== undefined && <p style={hint}>{notice}</p>}
-    </div>
+      {error !== undefined && <p className={styles.error}>{error}</p>}
+      {notice !== undefined && <p className={styles.notice}>{notice}</p>}
+    </Card>
   )
 }

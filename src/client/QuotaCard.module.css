@@ -1,0 +1,112 @@
+/**
+ * Quota rows: one block per window, then the wallet and spend footnotes.
+ */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.window {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.windowHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.windowName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ods-text);
+}
+
+.windowMeta {
+  font-size: 11px;
+  color: var(--ods-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.barLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.barLine > :first-child {
+  flex: 1;
+}
+
+.windowPercent {
+  min-width: 62px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ods-text);
+}
+
+.windowFoot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ods-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.missing {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ods-text-2);
+}
+
+.wallet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ods-border);
+  font-size: 12px;
+  color: var(--ods-text-2);
+}
+
+.walletValue {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ods-text);
+}
+
+.spend {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ods-border);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ods-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.stamp {
+  font-size: 11px;
+  color: var(--ods-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

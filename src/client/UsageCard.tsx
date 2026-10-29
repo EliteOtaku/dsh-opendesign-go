@@ -14,27 +14,8 @@
  */
 import type { ReactElement } from 'react'
 import type { UsageReport } from '../usage-ledger.ts'
-
-const card = {
-  border: '1px solid rgba(128, 128, 128, 0.25)',
-  borderRadius: '10px',
-  padding: '14px 16px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '12px',
-} as const
-
-const hint = { fontSize: '13px', opacity: 0.65, margin: 0 } as const
-
-const rowStyle = {
-  display: 'grid',
-  gridTemplateColumns: '1fr auto auto auto',
-  gap: '10px',
-  alignItems: 'baseline',
-  fontSize: '12px',
-  padding: '6px 0',
-  borderTop: '1px solid rgba(128, 128, 128, 0.14)',
-} as const
+import { Card, cx } from './ui/primitives.tsx'
+import styles from './UsageCard.module.css'
 
 /**
  * Format a token count compactly.
@@ -64,71 +45,59 @@ function money(usd: number): string {
 export function UsageCard({ report }: { readonly report: UsageReport | undefined }): ReactElement {
   if (report === undefined || (report.calls === 0 && report.recovered === undefined)) {
     return (
-      <div style={card}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>本地用量</div>
-        <p style={hint}>
-          还没有通过本插件发出的请求。这里只统计经本插件路由的调用，其他 provider 与 OpenDesign
-          官方客户端的用量不计入。
-        </p>
-      </div>
+      <Card
+        title="本地用量"
+        description="还没有通过本插件发出的请求。这里只统计经本插件路由的调用，其他 provider 与 OpenDesign 官方客户端的用量不计入。"
+      />
     )
   }
 
   return (
-    <div style={card}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>本地用量 · 近 30 天</div>
-        <span style={{ fontSize: '12px', opacity: 0.6 }}>
+    <Card
+      title="本地用量 · 近 30 天"
+      description={report.unpricedCalls > 0 ? `本次有 ${report.unpricedCalls} 次请求未计入金额。` : undefined}
+      actions={(
+        <span className={styles.headCell}>
           {report.calls} 次请求 · 估算 {money(report.costUsd)}
         </span>
-      </div>
-
+      )}
+    >
       {report.recovered !== undefined && report.recovered.calls > 0 && (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '2px',
-          fontSize: '11px',
-          opacity: 0.6,
-          borderTop: '1px solid rgba(128,128,128,0.18)',
-          paddingTop: '8px',
-        }}>
-          <div>
-            另有 {report.recovered.calls} 次历史调用（{money(report.recovered.costUsd)}）
-            未经过本插件，从会话日志补算。
-          </div>
-          <div style={{ opacity: 0.85 }}>
+        <div className={styles.recovered}>
+          <span>
+            另有 {report.recovered.calls} 次历史调用（{money(report.recovered.costUsd)}）未经过本插件，从会话日志补算。
+          </span>
+          <span>
             这些是插件做出来之前，用 DSH 自定义模型直连 OpenDesign 的消耗；
             缓存读 {Math.round(report.recovered.cacheReadTokens / 1000)}k token 已计入。
-          </div>
+          </span>
         </div>
       )}
 
-      <div style={{ ...rowStyle, borderTop: 'none', opacity: 0.55, paddingBottom: 0 }}>
-        <span>模型</span>
-        <span>输入 / 输出</span>
-        <span>请求</span>
-        <span style={{ textAlign: 'right' }}>估算</span>
+      <div className={styles.table}>
+        <span className={styles.headCell}>模型</span>
+        <span className={cx(styles.headCell, styles.num)}>输入 / 输出</span>
+        <span className={cx(styles.headCell, styles.num)}>请求</span>
+        <span className={cx(styles.headCell, styles.num)}>估算</span>
+
+        {report.models.map((row) => (
+          <span key={row.model} style={{ display: 'contents' }}>
+            <span className={cx(styles.cell, styles.model)} title={row.model}>{row.model}</span>
+            <span className={cx(styles.cell, styles.num)}>
+              {tokens(row.inputTokens)} / {tokens(row.outputTokens)}
+            </span>
+            <span className={cx(styles.cell, styles.num)}>{row.calls}</span>
+            <span className={cx(styles.cell, styles.num)}>
+              {row.unpricedCalls === row.calls ? '未定价' : money(row.costUsd)}
+            </span>
+          </span>
+        ))}
       </div>
 
-      {report.models.map((row) => (
-        <div key={row.model} style={rowStyle}>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.model}</span>
-          <span style={{ fontVariantNumeric: 'tabular-nums', opacity: 0.75 }}>
-            {tokens(row.inputTokens)} / {tokens(row.outputTokens)}
-          </span>
-          <span style={{ fontVariantNumeric: 'tabular-nums', opacity: 0.75 }}>{row.calls}</span>
-          <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-            {row.unpricedCalls === row.calls ? '未定价' : money(row.costUsd)}
-          </span>
-        </div>
-      ))}
-
-      <p style={{ ...hint, fontSize: '11px', lineHeight: 1.5 }}>
-        金额按官方公开价目表的**基础档**估算：超出阶梯阈值的请求会被低估；标「未定价」的模型只计 token，不计金额。
-        {report.unpricedCalls > 0 && ` 本次有 ${report.unpricedCalls} 次请求未计入金额。`}
+      <p className={styles.foot}>
+        金额按官方公开价目表的<b>基础档</b>估算：超出阶梯阈值的请求会被低估；标「未定价」的模型只计 token，不计金额。
         这不是账单，实际扣费以 OpenDesign 控制台为准。
       </p>
-    </div>
+    </Card>
   )
 }

@@ -63,6 +63,10 @@ export interface LiveConfig {
     readonly autoSwitch: {
         get(): boolean;
     };
+    /** Whether the composer shows the quota pill. */
+    readonly composerUsage: {
+        get(): boolean;
+    };
     /** Credential reference of the console session; empty when the channel is off. */
     readonly sessionRef: {
         get(): string;

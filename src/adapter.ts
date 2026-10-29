@@ -600,6 +600,39 @@ function translateEvent(state: StreamState, payload: string): StreamChunk[] {
 }
 
 /**
+ * Reasoning text carried by one streaming delta.
+ *
+ * The gateway does not agree with itself: `opencode.ai` spells the increment
+ * `reasoning_content`, `OpenDesign` sends `reasoning` next to a
+ * `reasoning_details` array holding the same text in structured form. Reading
+ * only the first spelling drops this provider's reasoning entirely — the
+ * thought block never opens, so a thinking model's tokens vanish and the turn
+ * can even end as empty.
+ *
+ * The three are alternatives, never additive: taking the first that carries
+ * text is what stops the same increment from being reported twice.
+ * @param delta - the provider's delta object.
+ * @returns the increment, or undefined when this delta carries none.
+ */
+function reasoningText(delta: Record<string, unknown>): string | undefined {
+  const content = delta.reasoning_content
+  if (typeof content === 'string' && content !== '') return content
+
+  const reasoning = delta.reasoning
+  if (typeof reasoning === 'string' && reasoning !== '') return reasoning
+
+  const details = delta.reasoning_details
+  if (!Array.isArray(details)) return undefined
+  let text = ''
+  for (const part of details) {
+    if (!isRecord(part)) continue
+    const piece = part.text
+    if (typeof piece === 'string') text += piece
+  }
+  return text === '' ? undefined : text
+}
+
+/**
  * Translate one streaming delta into chunks.
  * @param state - per-response streaming state.
  * @param delta - the provider's delta object.
@@ -617,8 +650,8 @@ function collectDelta(state: StreamState, delta: Record<string, unknown>, chunks
     chunks.push({ type: 'text-delta', index: state.text.index, text: content })
   }
 
-  const reasoning = delta.reasoning_content
-  if (typeof reasoning === 'string' && reasoning !== '') {
+  const reasoning = reasoningText(delta)
+  if (reasoning !== undefined) {
     if (state.reasoning === undefined) {
       state.reasoning = { index: takeIndex(state), text: '' }
       state.contentBlocks += 1

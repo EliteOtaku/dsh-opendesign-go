@@ -31,6 +31,17 @@ export declare const STOP_AT: number;
  */
 export declare function windowLabel(durationSeconds: number): string;
 /**
+ * Abbreviate a window length for a place with no room for words.
+ *
+ * The composer pill sits in the tool row beside the submit action, where
+ * `5 小时` and `7 天` would push the composer out of shape; `5h` and `7d` read
+ * the same and take a third of the width. Derived from the same
+ * `durationSeconds`, so a new plan window needs no change here.
+ * @param durationSeconds - window length from the console.
+ * @returns an abbreviated label such as `5h` or `7d`.
+ */
+export declare function compactWindowLabel(durationSeconds: number): string;
+/**
  * Format a reset time as a coarse countdown, which is what a quota bar needs.
  * @param resetsAt - ISO timestamp from the console.
  * @param now - reference instant.

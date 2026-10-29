@@ -12,7 +12,7 @@
  *
  * @module dsh-opendesign-go/client/Section
  */
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useMemo, useState, useEffect, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { PROFILE_ENTRY_ID } from '../config-contract.ts'
@@ -29,6 +29,9 @@ import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 import { ModelsCard } from './ModelsCard.tsx'
 import type { ChannelState, ExecuteAccountCommand } from './accounts-controller.ts'
+import { Badge, Button, Card, Row, Switch, cx } from './ui/primitives.tsx'
+import tokens from './ui/tokens.module.css'
+import styles from './Section.module.css'
 
 /** Props injected into the section by the registering plugin. */
 export interface OpenDesignSectionInjected {
@@ -40,63 +43,6 @@ export interface OpenDesignSectionInjected {
   readonly channelState: ChannelState
 }
 
-const pageStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '20px',
-  padding: '4px 0 24px',
-} as const
-
-const titleStyle = { fontSize: '20px', fontWeight: 600, margin: 0 } as const
-
-const hintStyle = { fontSize: '13px', opacity: 0.65, margin: 0 } as const
-
-const cardStyle = {
-  border: '1px solid rgba(128, 128, 128, 0.25)',
-  borderRadius: '10px',
-  padding: '14px 16px',
-} as const
-
-const rowStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '16px',
-} as const
-
-const listStyle = {
-  listStyle: 'none',
-  margin: '10px 0 0',
-  padding: 0,
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-  gap: '6px 18px',
-  fontSize: '13px',
-} as const
-
-const buttonStyle = {
-  fontSize: '12px',
-  padding: '3px 10px',
-  borderRadius: '6px',
-  border: '1px solid rgba(128, 128, 128, 0.35)',
-  background: 'transparent',
-  color: 'inherit',
-  cursor: 'pointer',
-} as const
-
-const inputStyle = {
-  display: 'block',
-  width: '100%',
-  marginTop: '4px',
-  padding: '6px 8px',
-  fontSize: '12px',
-  borderRadius: '6px',
-  border: '1px solid rgba(128, 128, 128, 0.3)',
-  background: 'transparent',
-  color: 'inherit',
-  boxSizing: 'border-box',
-} as const
-
 /**
  * Render the settings page.
  * @param props - injected config form and optional quota reader.
@@ -105,6 +51,9 @@ const inputStyle = {
 export function OpenDesignSection({ form, execute, channelState }: OpenDesignSectionInjected): ReactElement {
   const snapshot = useSyncExternalStore(
     (listener) => form.subscribe(listener),
+    () => form.getSnapshot(),
+    // The same reading for a render that has no client store, so the page can
+    // still be rendered to markup outside the app (tests, snapshots).
     () => form.getSnapshot(),
   )
   const value = snapshot.value
@@ -213,73 +162,67 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   }
 
   return (
-    <div style={pageStyle}>
-      <div>
-        <h1 style={titleStyle}>OpenDesign Go</h1>
-        <p style={{ ...hintStyle, marginTop: '6px' }}>
-          选择会话中显示的 OpenDesign Go 模型，并调整其设置。
-        </p>
-      </div>
+    <div className={cx(tokens.scope, styles.page)}>
+      <header className={styles.header}>
+        <h1 className={styles.title}>OpenDesign Go</h1>
+        <p className={styles.subtitle}>选择会话中显示的 OpenDesign Go 模型，并调整其设置。</p>
+      </header>
 
       {snapshot.status === 'loading' && (
-        <div style={{ ...hintStyle, display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span>正在读取配置…</span>
-          <button type="button" onClick={retry} style={buttonStyle}>重新加载</button>
+        <div className={styles.inlineActions}>
+          <span className={styles.subtitle}>正在读取配置…</span>
+          <Button onClick={retry}>重新加载</Button>
         </div>
       )}
+
       {snapshot.status === 'unavailable' && (
-        <div style={{ ...hintStyle, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div className={cx(styles.notice, styles.noticeWarn)}>
           <span>宿主未暴露本插件的配置项（namespace: {PROFILE_ENTRY_ID}）。</span>
-          <span style={{ fontSize: '11px', opacity: 0.7 }}>
+          <span className={styles.noticeFoot}>
             诊断：{snapshot.status} / revision={String(snapshot.revision)} / writable={String(snapshot.writable)}
           </span>
-          <button type="button" onClick={retry} style={buttonStyle}>重新加载</button>
+          <div className={styles.inlineActions}><Button onClick={retry}>重新加载</Button></div>
         </div>
       )}
 
       {routeProblem !== undefined && (
-        <div style={{
-          // Warning colours, not error: the plugin loaded and the page works. What
-          // is missing is the route, and every listed cause is recoverable.
-          border: '1px solid rgba(217,119,6,0.45)',
-          background: 'rgba(217,119,6,0.09)',
-          borderRadius: '8px',
-          padding: '12px 14px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-        }}>
-          <div style={{ fontSize: '13px', fontWeight: 500 }}>⚠ {routeProblem.title}</div>
-          <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', opacity: 0.85, lineHeight: 1.7 }}>
+        <div className={cx(styles.notice, styles.noticeWarn)}>
+          <div className={styles.noticeTitle}>⚠ {routeProblem.title}</div>
+          <ul className={styles.noticeList}>
             {routeProblem.causes.map((cause) => <li key={cause.text}>{cause.text}</li>)}
           </ul>
-          <div style={{ fontSize: '11px', opacity: 0.6 }}>
-            最新状态见页面下方的「路由状态」。
-          </div>
+          <div className={styles.noticeFoot}>最新状态见页面下方的「路由状态」。</div>
         </div>
       )}
 
-      <div style={cardStyle}>
-        <div style={rowStyle}>
-          <div>
-            <div style={{ fontSize: '14px', fontWeight: 500 }}>启用 OpenDesign Go</div>
-            <p style={{ ...hintStyle, marginTop: '4px' }}>
-              关闭后，本插件提供的模型会从会话选择器中移除。
-            </p>
-          </div>
-          <input
-            type="checkbox"
+      <Card
+        title="启用 OpenDesign Go"
+        description="关闭后，本插件提供的模型会从会话选择器中移除。"
+        actions={(
+          <Switch
             checked={enabled}
             disabled={!editable}
-            onChange={(event) => { toggle(event.target.checked) }}
-            aria-label="启用 OpenDesign Go"
+            label="启用 OpenDesign Go"
+            onChange={toggle}
           />
-        </div>
-      </div>
+        )}
+      >
+        <Row
+          label="在输入框旁显示额度"
+          hint="始终显示 5 小时与 7 天的剩余额度，点开可看每条窗口的明细与钱包余额。"
+        >
+          <Switch
+            checked={value?.composerUsage ?? true}
+            disabled={!editable}
+            label="在输入框旁显示额度"
+            onChange={(next) => { void form.set('composerUsage', next) }}
+          />
+        </Row>
+      </Card>
 
       <AccountsCard form={form} config={value} editable={editable} execute={execute} channelState={channelState} />
 
-      <UsageCard report={report} />
+      <ModelsCard form={form} config={value} editable={editable} />
 
       <QuotaCard
         snapshot={usage}
@@ -298,107 +241,77 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
         editable={editable}
       />
 
-      <div style={cardStyle}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>额度来源</div>
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginTop: '8px', cursor: editable ? 'pointer' : 'default' }}>
-          <input
-            type="checkbox"
+      <UsageCard report={report} />
+
+      <Card
+        title="额度来源"
+        description="决定 5 小时 / 7 天额度从哪里读取。"
+        badge={useVela ? <Badge tone="ok">本机登录</Badge> : <Badge>会话凭据</Badge>}
+      >
+        <Row
+          label="使用本机 OpenDesign 的登录凭证"
+          hint="装过并登录过 OpenDesign 桌面端时，勾选即可读到真实额度，无需再填凭据。只用 API Key 就保持关闭。"
+        >
+          <Switch
             checked={useVela}
             disabled={!editable}
-            onChange={(event) => { void form.set('useVelaCredential', event.target.checked) }}
-            style={{ marginTop: '2px' }}
+            label="使用本机 OpenDesign 的登录凭证"
+            onChange={(next) => { void form.set('useVelaCredential', next) }}
           />
-          <span style={{ fontSize: '13px' }}>
-            使用本机 OpenDesign 的登录凭证读取额度
-            <span style={{ display: 'block', fontSize: '12px', opacity: 0.62, marginTop: '2px', lineHeight: 1.5 }}>
-              如果你安装并登录过 OpenDesign 桌面端，勾选后即可直接读取真实的 5 小时 / 7 天额度，
-              无需再填任何凭据。只想用 API Key 的话保持关闭即可。
-            </span>
-          </span>
-        </label>
+        </Row>
         {useVela && (
-          <p style={{ ...hintStyle, marginTop: '8px', fontSize: '12px' }}>
-            读取方式：调用 OpenDesign 桌面端自带的 vela 命令行。该命令属官方私有接口，
+          <p className={styles.routeLine}>
+            读取方式：调用 OpenDesign 桌面端自带的 vela 命令行。该命令是官方私有接口，
             若 OpenDesign 升级后格式变化，这里会显示失败原因而不是给出错误数字。
           </p>
         )}
-      </div>
+      </Card>
 
-      <div style={cardStyle}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>路由状态</div>
+      <Card
+        title="路由状态"
+        description="本插件在宿主里的注册结果，与额度无关。"
+        badge={routeState === undefined
+          ? <Badge>未知</Badge>
+          : routeState.registered ? <Badge tone="ok">已注册</Badge> : <Badge tone="warn">未注册</Badge>}
+      >
         {routeState === undefined ? (
-          <p style={{ ...hintStyle, marginTop: '4px' }}>
-            宿主尚未上报路由状态。重启后若仍为空，说明插件未完成激活。
-          </p>
+          <p className={styles.routeLine}>宿主尚未上报路由状态。重启后若仍为空，说明插件未完成激活。</p>
         ) : (
-          <p style={{ ...hintStyle, marginTop: '4px', fontSize: '12px' }}>
-            {routeState.registered ? '已注册' : '未注册'}
-            {' · '}启用={String(routeState.enabled)}
-            {' · '}凭据={routeState.credentialResolved ? '已解析' : '未解析'}（{routeState.triedRef || '无'}）
-            {' · '}声明模型 {routeState.modelCount} 个
-            {routeState.lastError !== undefined && ` · 失败：${routeState.lastError}`}
+          <p className={styles.routeLine}>
+            <span>启用={String(routeState.enabled)}</span>
+            <span className={styles.footerSep}>·</span>
+            <span>凭据={routeState.credentialResolved ? '已解析' : '未解析'}（{routeState.triedRef || '无'}）</span>
+            <span className={styles.footerSep}>·</span>
+            <span>声明模型 {routeState.modelCount} 个</span>
+            {routeState.lastError !== undefined && (
+              <>
+                <span className={styles.footerSep}>·</span>
+                <span>失败：{routeState.lastError}</span>
+              </>
+            )}
           </p>
         )}
-      </div>
-
-      <ModelsCard form={form} config={value} editable={editable} />
+      </Card>
 
       {update !== undefined && (
-        <div style={{
-          // Deliberately not an error colour: a newer release is information, and
-          // painting it red would suggest this build is broken.
-          border: '1px solid rgba(77,107,254,0.45)',
-          background: 'rgba(77,107,254,0.08)',
-          borderRadius: '8px',
-          padding: '10px 12px',
-          fontSize: '12px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '3px',
-        }}>
-          <div style={{ fontWeight: 500 }}>
-            有新版本 {update.latest}（当前 {update.current}）
-          </div>
-          <div style={{ opacity: 0.7 }}>
+        <div className={cx(styles.notice, styles.noticeInfo)}>
+          <div className={styles.noticeTitle}>有新版本 {update.latest}（当前 {update.current}）</div>
+          <div className={styles.noticeFoot}>
             桌面端插件管理里卸载重装，或执行 dsh plugin --profile web add dsh-opendesign-go@latest
           </div>
         </div>
       )}
 
-      <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: '10px',
-        alignItems: 'center',
-        fontSize: '12px',
-        opacity: 0.7,
-        borderTop: '1px solid rgba(128,128,128,0.18)',
-        paddingTop: '12px',
-      }}>
-        <a
-          href="https://github.com/EliteOtaku/dsh-opendesign-go"
-          target="_blank"
-          rel="noreferrer noopener"
-          style={{ color: 'inherit' }}
-        >
+      <div className={styles.footer}>
+        <a className={styles.link} href="https://github.com/EliteOtaku/dsh-opendesign-go" target="_blank" rel="noreferrer noopener">
           GitHub 仓库 · 欢迎 Star ★
         </a>
-        <span style={{ opacity: 0.5 }}>|</span>
-        <a
-          href="https://github.com/EliteOtaku/dsh-opendesign-go#readme"
-          target="_blank"
-          rel="noreferrer noopener"
-          style={{ color: 'inherit' }}
-        >
+        <span className={styles.footerSep}>|</span>
+        <a className={styles.link} href="https://github.com/EliteOtaku/dsh-opendesign-go#readme" target="_blank" rel="noreferrer noopener">
           文档
         </a>
-        <span style={{ opacity: 0.5 }}>|</span>
-        <a
-          href="https://github.com/EliteOtaku/dsh-opendesign-go/issues"
-          target="_blank"
-          rel="noreferrer noopener"
-          style={{ color: 'inherit' }}
-        >
+        <span className={styles.footerSep}>|</span>
+        <a className={styles.link} href="https://github.com/EliteOtaku/dsh-opendesign-go/issues" target="_blank" rel="noreferrer noopener">
           反馈问题
         </a>
       </div>

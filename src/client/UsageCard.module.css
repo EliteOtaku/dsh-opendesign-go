@@ -1,0 +1,56 @@
+/**
+ * Local usage table: one line per model plus the trailing-window totals.
+ */
+
+.table {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.headCell {
+  padding: 0 0 6px;
+  font-size: 11px;
+  color: var(--ods-text-3);
+  border-bottom: 1px solid var(--ods-border);
+}
+
+.cell {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--ods-border);
+  color: var(--ods-text-2);
+}
+
+.headCell:not(:last-child),
+.cell:not(:last-child) {
+  padding-right: 14px;
+}
+
+.model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ods-text);
+}
+
+.num {
+  text-align: right;
+}
+
+.recovered {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ods-text-3);
+}
+
+.foot {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ods-text-3);
+}

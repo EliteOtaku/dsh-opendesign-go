@@ -22,6 +22,7 @@
 | 接入 Go 套餐 | 注册一个 `dsh-opendesign-go` provider，提供 Design Plan 的 12 个模型 |
 | 用量统计 | 记录每次经本插件发出的请求，按模型汇总输入/输出/缓存 token，并按各厂商公开单价估算成本 |
 | 额度读取 | 勾选后调用本机 OpenDesign 桌面端自带的 `vela` 命令行，读取真实的 5 小时 / 7 天额度窗口 |
+| 输入框额度条 | 选中本插件的模型时，会话输入框旁出现一枚胶囊，显示 5 小时与 7 天的**剩余**百分比，点开可看倒计时、钱包余额与刷新 |
 | 多账号 | 每个账号对应一份独立的 OpenDesign 订阅，每份一把 API Key；可开启失败自动切换 |
 | 每模型参数 | 为单个模型覆盖上下文窗口与 `max_tokens` 上限 |
 | 模型开关 | 取消勾选的模型不出现在会话的模型选择器里 |
@@ -44,6 +45,7 @@
 | 参数表 | 12 个模型的窗口与输出上限逐条对应厂商文档 | 出处逐条列在 [docs/models.md](docs/models.md) |
 | 额度口径 | credits 与美元 10,000 : 1；5 小时 50,000、7 天 150,000 | 两个窗口独立折算互证，与 `vela` 输出一致 |
 | 工具侧图片 | 图片改由紧随其后的 `user` 消息承载，直连与经中间件都到达模型 | 同一条工具结果在两种链路下逐模型比对 |
+| 输入框槽位 | 三版宿主都提供 `conversation.input.right`（list 型、session 作用域） | 逐版解包 `dsh-client-ui-conversation` 的 `slots.d.ts` 核对 |
 
 宿主兼容矩阵的三层是递进的，缺一层就会漏掉一类故障：**符号**抓导出被改名或删除（导入本身不报错，要到首次调用才炸），**类型**抓符号还在但签名漂移，**挂载**才是真实 Cordis 运行时接不接受入口。反向验证也做过——向产物注入不存在的导出会报 `thisExportDoesNotExist`，向源码写类型错误会报 `TS2322`，不会永远通过。
 
@@ -119,7 +121,7 @@ npm 包把构建产物和依赖版本一起锁定。GitHub 方式也能用（填
 
 配置写在插件自己的 profile 条目 `opendesign-go` 下，命名空间为 `llm-opendesign-go`。所有字段都是 `volatile()` 引用，改完即时生效，不需要重启。
 
-设置页直接可改的是：启用开关、额度来源、账号列表（含每账号的 `workspaceId`）、模型开关、每模型参数、对账基准。其余字段（`apiKeyEnv`、`baseURL`、`requestTimeoutMs`、`streamIdleTimeoutMs`、`autoSwitch`、`sessionRef`、`workspaceId`、`planOverrides`、`recoveredEnabled`、`recoveredProviders`）目前需要编辑 profile 条目的 config 块。
+设置页直接可改的是：启用开关、输入框额度条开关、额度来源、账号列表（含每账号的 `workspaceId`）、模型开关、每模型参数、对账基准。其余字段（`apiKeyEnv`、`baseURL`、`requestTimeoutMs`、`streamIdleTimeoutMs`、`autoSwitch`、`sessionRef`、`workspaceId`、`planOverrides`、`recoveredEnabled`、`recoveredProviders`）目前需要编辑 profile 条目的 config 块。
 
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
@@ -127,6 +129,7 @@ npm 包把构建产物和依赖版本一起锁定。GitHub 方式也能用（填
 | `apiKeyEnv` | `OPENDESIGN_API_KEY` | 凭据引用名。插件按这个名字向 DSH 凭据服务（或启动环境变量）取 API Key，配置里不放密钥明文 |
 | `accounts` | `[]` | 账号列表，每项含 `id`、`name`、`apiKeyEnv`、可选 `workspaceId`。第一项是当前账号，顺序即故障切换顺序；上限 20 个 |
 | `autoSwitch` | `false` | 开启后，当前账号遇到凭据被拒或额度耗尽时按列表顺序尝试下一个账号 |
+| `composerUsage` | `true` | 在会话输入框旁显示 5 小时 / 7 天额度条。只控制显示，关掉不影响读取 |
 | `useVelaCredential` | `false` | 用本机 OpenDesign 桌面端的登录态读取额度，无需另填凭据 |
 | `sessionRef` | `''` | 使用控制台会话读取额度时的凭据引用名（`OPENDESIGN_SESSION`）。仅在不用 `vela` 且需要控制台通道时填写 |
 | `workspaceId` | `''` | 控制台通道的工作空间 ID；`vela` 通道会自动探测，一般留空 |
@@ -162,6 +165,10 @@ API Key 保存在 DSH 凭据服务里，设置页只显示引用名，不回显�
 也支持环境变量 `OPENDESIGN_VELA_PATH` 指定路径。查找顺序是：环境变量 → 官方安装目录 → `PATH`。官方安装目录优先于 `PATH`，因为只有它共享桌面端的登录态。
 
 `vela` 是官方私有命令行，不是公开契约。插件会校验它输出的每个字段：格式变了就显示失败原因，不会给出一个看似正常的错误数字。
+
+读到的额度不只出现在设置页：会话输入框旁还有一枚胶囊，显示 `5h 62% · 7d 88%`，点开是明细。它读的是宿主已经写进配置的那份读数，不额外发请求，所以不会让会话变慢。
+
+胶囊**只在这个插件的模型是当前选择时出现**。别的 provider 花的是另一份额度，把自己的数字摆在别人的请求旁边会误导；同一个位置也可能被其他插件占用，不该并排显示两个互不相干的余额。
 
 详见 [docs/quota.md](docs/quota.md)。
 

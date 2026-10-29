@@ -1,0 +1,151 @@
+/**
+ * The composer quota pill and its panel.
+ *
+ * Sized for the composer tool row: 28px tall, one line, no wrapping, so it sits
+ * beside the submit button without changing the composer's height.
+ */
+
+.root {
+  position: relative;
+  display: inline-flex;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--ods-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ods-text-2);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pill:hover,
+.pill[aria-expanded='true'] {
+  background: var(--ods-hover);
+  border-color: var(--ods-border-strong);
+  color: var(--ods-text);
+}
+
+.pill:focus-visible {
+  outline: 2px solid var(--ods-accent);
+  outline-offset: 1px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.text {
+  font-variant-numeric: tabular-nums;
+}
+
+.unit {
+  opacity: 0.72;
+}
+
+.percent {
+  font-weight: 600;
+}
+
+.sep {
+  opacity: 0.4;
+}
+
+.panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 320px;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--ods-border);
+  border-radius: var(--ods-radius);
+  background: var(--ods-surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  color: var(--ods-text);
+  text-align: left;
+}
+
+.panelHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.panelTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.panelStamp {
+  font-size: 11px;
+  color: var(--ods-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rowHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.rowName {
+  font-weight: 500;
+}
+
+.rowValue {
+  font-variant-numeric: tabular-nums;
+}
+
+.rowMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ods-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.notice {
+  font-size: 11px;
+  color: var(--ods-warn);
+}
+
+.panelFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ods-border);
+}
+
+/* The shared bar is 4px; inside the panel it sits between two text lines, so
+   it gets a little air rather than a different thickness. */
+.rowBar {
+  margin: 6px 0 5px;
+}

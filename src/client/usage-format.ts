@@ -42,6 +42,24 @@ export function windowLabel(durationSeconds: number): string {
 }
 
 /**
+ * Abbreviate a window length for a place with no room for words.
+ *
+ * The composer pill sits in the tool row beside the submit action, where
+ * `5 小时` and `7 天` would push the composer out of shape; `5h` and `7d` read
+ * the same and take a third of the width. Derived from the same
+ * `durationSeconds`, so a new plan window needs no change here.
+ * @param durationSeconds - window length from the console.
+ * @returns an abbreviated label such as `5h` or `7d`.
+ */
+export function compactWindowLabel(durationSeconds: number): string {
+  const days = durationSeconds / 86400
+  if (Number.isInteger(days) && days >= 1) return `${days}d`
+  const hours = durationSeconds / 3600
+  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`
+  return `${Math.round(durationSeconds / 60)}m`
+}
+
+/**
  * Format a reset time as a coarse countdown, which is what a quota bar needs.
  * @param resetsAt - ISO timestamp from the console.
  * @param now - reference instant.

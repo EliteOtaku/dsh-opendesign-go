@@ -19,7 +19,7 @@ export const DISPLAY_NAME = 'OpenDesign Go'
  * a single file with no reliable path back to its own package, and the update
  * check needs a value it can compare without filesystem access.
  */
-export const PLUGIN_VERSION = '0.1.9'
+export const PLUGIN_VERSION = '0.1.11'
 
 /** Settings namespace this plugin installs and the Web page edits. */
 export const SETTINGS_NAMESPACE = 'llm-opendesign-go'
@@ -74,6 +74,15 @@ export interface OpenDesignConfig {
   readonly accounts: readonly OpenDesignAccount[] | null
   /** Try the next account after a credential rejection. */
   readonly autoSwitch: boolean
+  /**
+   * Show the quota pill in the composer.
+   *
+   * A display toggle only: the pill reads the same cached {@link usageJson} the
+   * page shows, and whether that cache refreshes still follows the account and
+   * refresh settings. On by default, because a quota the user cannot see
+   * between requests is the problem the pill exists to solve.
+   */
+  readonly composerUsage: boolean
   /**
    * Credential reference holding the console session token. Empty string means
    * the quota channel is off, which is the default: reading the console grants
