@@ -15,7 +15,7 @@
 import type { ModelPrice } from './usage-ledger.ts'
 
 /** When this snapshot was read from the public endpoint. */
-export const PRICES_AS_OF = '2026-10-19'
+export const PRICES_AS_OF = '2026-11-07'
 
 /** Endpoint that serves the live list. */
 export const PRICES_URL = 'https://amr-api.open-design.ai/api/v1/public/model-prices'
@@ -31,6 +31,9 @@ export const BASE_PRICES: readonly ModelPrice[] = [
   { model: 'claude-sonnet-5', input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   { model: 'claude-sonnet-5.5', input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   { model: 'deepseek-v4.1-flash', input: 0.3, output: 1.2, cacheRead: 0.006 },
+  // The slow tier is priced identically to the model it mirrors; the endpoint
+  // publishes the same input/output/cacheRead triple for both.
+  { model: 'deepseek-v4.1-flash-eco', input: 0.3, output: 1.2, cacheRead: 0.006 },
   { model: 'deepseek-v4-flash', input: 0.44, output: 1.32, cacheRead: 0.014 },
   { model: 'deepseek-v4-flash-vision-exp', input: 0.44, output: 1.32, cacheRead: 0.014 },
   { model: 'deepseek-v4-pro', input: 1.32, output: 3.96, cacheRead: 0.044 },

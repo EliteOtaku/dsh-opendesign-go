@@ -6,7 +6,7 @@
  * merged with the public `model-prices` endpoint, keeping this module as the
  * merge point so callers never depend on where a row came from.
  *
- * The twelve ids below are the Design Plan models the Go plan grants. Go does
+ * The thirteen ids below are the Design Plan models the Go plan grants. Go does
  * not include the package-model allowance, so nothing else is advertised.
  *
  * @module dsh-opendesign-go/catalog
@@ -34,6 +34,7 @@ export interface CatalogModel {
  */
 export const GO_DESIGN_PLAN_MODELS: readonly CatalogModel[] = [
   { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+  { id: 'deepseek-v4.1-flash-eco', name: 'DeepSeek V4.1 Flash Eco' },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
   { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp' },
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },

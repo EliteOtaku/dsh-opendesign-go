@@ -8,11 +8,11 @@ describe('parseRouteDiagnostics', () => {
       enabled: true,
       credentialResolved: true,
       triedRef: 'OPENDESIGN_API_KEY',
-      modelCount: 12,
+      modelCount: 13,
       asOf: '2026-10-19T07:00:00.000Z',
     }))
     expect(value?.registered).toBe(true)
-    expect(value?.modelCount).toBe(12)
+    expect(value?.modelCount).toBe(13)
     expect(value?.triedRef).toBe('OPENDESIGN_API_KEY')
   })
 
@@ -22,7 +22,7 @@ describe('parseRouteDiagnostics', () => {
       enabled: true,
       credentialResolved: true,
       triedRef: 'X',
-      modelCount: 12,
+      modelCount: 13,
       lastError: 'provider already registered',
       asOf: '2026-10-19T07:00:00.000Z',
     }))

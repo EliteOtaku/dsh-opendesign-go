@@ -41,11 +41,12 @@ export interface ModelParamOverride {
  * Model limits, taken from each vendor's own documentation.
  *
  * These are pass-through models, not a re-implementation: the gateway serves
- * `deepseek-v4.1-flash` as `deepseek-flash`, and both return the same
- * `system_fingerprint` (`e72d3c7f663d3e1383b00b3884cb4501`) as
- * `api.deepseek.com`. A request with `max_tokens: 384000` is accepted, so the
- * 128000 in the gateway's `metadata.output_budget` is broadcast metadata rather
- * than an enforced limit — using it would under-report what the model can do.
+ * `deepseek-v4.1-flash` as `deepseek-flash`. It also used to return DeepSeek's
+ * own `system_fingerprint`, which is what pinned the pass-through; that field is
+ * now an empty string on both ids, so the standing evidence is behavioural — a
+ * request with `max_tokens: 384000` is accepted, which makes the 128000 in the
+ * gateway's `metadata.output_budget` broadcast metadata rather than an enforced
+ * limit. Using it would under-report what the model can do.
  *
  * Where a vendor publishes 384K output and 1M context, those are the numbers
  * here. DeepSeek's docs also note that `deepseek-v4-flash` and

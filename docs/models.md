@@ -1,6 +1,6 @@
 # 模型与参数
 
-模型目录是代码内的静态表（`src/catalog.ts` 的 `GO_DESIGN_PLAN_MODELS`），共 12 个，对应 Go 套餐授予的 Design Plan 模型。参数默认值在 `src/model-params.ts` 的 `MODEL_DEFAULTS`。
+模型目录是代码内的静态表（`src/catalog.ts` 的 `GO_DESIGN_PLAN_MODELS`），共 13 个，对应 Go 套餐授予的 Design Plan 模型。参数默认值在 `src/model-params.ts` 的 `MODEL_DEFAULTS`。
 
 目录不来自线上接口：Go 套餐不包含套餐模型额度，可授予的集合是固定的，静态表省掉一次启动期网络依赖。
 
@@ -9,6 +9,7 @@
 | 显示名 | ID | 上下文 | 输出上限 | 输入模态 |
 | --- | --- | --- | --- | --- |
 | DeepSeek V4.1 Flash | `deepseek-v4.1-flash` | 1,000,000 | 384,000 | text, image |
+| DeepSeek V4.1 Flash Eco | `deepseek-v4.1-flash-eco` | 1,000,000 | 384,000 | text, image |
 | DeepSeek V4 Flash | `deepseek-v4-flash` | 1,000,000 | 384,000 | text, image |
 | DeepSeek V4 Flash Vision Exp | `deepseek-v4-flash-vision-exp` | 1,000,000 | 384,000 | text, image |
 | DeepSeek V4 Pro | `deepseek-v4-pro` | 1,000,000 | 384,000 | text |
@@ -24,6 +25,9 @@
 参数的取值依据（代码注释里保留了出处）：
 
 - **DeepSeek 系**：1M 上下文、384K 输出。`deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 是已退役 ID，官方文档的脚注明确两者都由 DeepSeek-V4.1-Flash-1017 承接，因此这两个 ID 的参数**与图片能力**都同 V4.1-Flash。`deepseek-v4-pro` 是另一个模型，官方价格表的「图像理解」一行对它标的是**不支持**。实测 `max_tokens: 384000` 会被接受，网关 `metadata.output_budget` 里的 128000 只是广播元数据，不是硬限制。
+- **DeepSeek V4.1 Flash Eco**：**DeepSeek 官方文档里没有这个 ID**。它是 OpenDesign 侧的慢速档，定价页把它列进 Design Plan 模型并注明「速度较慢」，[额度页](https://open-design.ai/model-credits/)的说法是「may respond more slowly at times」，建议用于批处理。所以上下文与输出上限没有厂商出处，只有实测依据：`max_tokens: 384000` 返 200，与 V4.1-Flash 相同；网关给它的 `metadata` 也与 V4.1-Flash 逐字段相同（`context_limit 1048000`、`context_budget 328000`）。表格里的 1,000,000 / 384,000 是这两条加上「参数同 V4.1-Flash」的合并结论，不是独立公布值。
+  - 价格与 V4.1-Flash 逐项相同：输入 0.3 / 输出 1.2 / 缓存读 0.006 USD per 1M token。
+  - 但**订阅额度的扣减倍率不同**：额度页给 eco 的 Design Plan credit 倍率是 0.27×，V4.1-Flash 是 0.5×。同样的工作量消耗更少的订阅额度，「慢速档更便宜」指的是这件事。本地账本按公开价目表估算、不乘倍率，所以两个模型的金额估算相同。
 - **Claude Haiku 5.5**：1M 上下文（比早期的 200K 放宽）、128K 输出。超限时端点会报 `maximum context length is 1000000 tokens`，这条独立印证了上下文数字。
 - **GLM-5.3 两个型号**：1M 上下文、128K 输出。
 - **GPT-6 Luna**：1,050,000 总上下文、128K 输出（922,000 输入 + 128,000 输出 = 1,050,000，三个数字自洽）。实测 1.5M token 的 prompt 未被端点拒绝，说明端点不自校验，这里采用文档值。
@@ -31,11 +35,12 @@
 - **MiMo 两个型号**：1M 上下文、128K 输出。
 - **Hunyuan H4 Preview**：1M 上下文、64K 输出。
 
-模态全部取自厂商文档，逐条注明出处：
+模态取自厂商文档，逐条注明出处；唯一例外是 `deepseek-v4.1-flash-eco`，厂商没有这个 ID，该行依据实测：
 
 | 厂商 | 依据 |
 | --- | --- |
 | DeepSeek | [价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing) 的「图像理解」行：`deepseek-flash` 支持、`deepseek-v4-pro` 不支持；脚注(1) 说明两个退役 ID 由 V4.1-Flash 承接。格式见[图像理解](https://api-docs.deepseek.com/zh-cn/guides/vision)页（JPEG/PNG/GIF/WebP） |
+| DeepSeek V4.1 Flash Eco | 厂商文档没有这个 ID，因此**没有厂商依据、只有实测**：96×96 的纯色图（红/蓝/绿）全部答对，左紫右黄的双色图答「purple 和 yellow」，左侧黑竖条答「A black vertical stripe on the left and a large white area」。网关 `architecture.input_modalities` 给它写的是 `["text"]`，与真实行为不符，未采用 |
 | Anthropic | Haiku 5.5 标准支持图像输入 |
 | OpenAI | GPT-6 Luna 标准支持图像输入 |
 | 智谱 | [GLM-5.3-Flash/FlashX 页](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)：原生多模态，输入模态为「视频、图像、文本、文件」 |
@@ -86,7 +91,7 @@
 | `medium` | 中 | 多数模型的默认值 |
 | `high` | 高 | |
 | `xhigh` | 较高 | |
-| `ultra` | 极高 | 仅 DeepSeek 系列与 GPT-6 Luna |
+| `ultra` | 极高 | 仅 DeepSeek 系列与 GPT-6 Luna（不含 Flash Eco） |
 | `max` | 最高 | |
 
 每个模型只显示它真正支持的推理等级，列表来自网关自己的拒绝信息：发送一个非法值，返回的错误里会写明该模型的合法取值集合。网关没有公开文档说明这个字段，实测是唯一可靠来源。
@@ -95,9 +100,10 @@
 | --- | --- |
 | deepseek-v4.1-flash、deepseek-v4-flash、deepseek-v4-flash-vision-exp、deepseek-v4-pro、gpt-6-luna | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`ultra`、`max` |
 | claude-haiku-5.5、kimi-k2.7-code、mimo-v2.6-flash、mimo-v2.6-pro、hy4-preview | `none` 到 `xhigh`（无 `ultra`） |
+| deepseek-v4.1-flash-eco | `none` 到 `xhigh`，另有 `max`（无 `ultra`） |
 | glm-5.3-flash、glm-5.3-flashx | 仅 `low`、`high`、`max` |
 
-选到该模型不支持的值，网关会返回 400。因此插件按模型过滤列表，并把默认等级钳制在合法范围内。
+选到该模型不支持的值，网关会返回 400。因此插件按模型过滤列表，并把默认等级钳制在合法范围内。`deepseek-v4.1-flash-eco` 是 **DeepSeek 系列里唯一没有 `ultra` 的一档**（其余四个 DeepSeek ID 与 GPT-6 Luna 都有）：五轮交替实测中它对 `ultra` 每次都在一秒内返回 400（`[code=upstream_error]`），同一时刻 base 五轮全部 200。它与其他没有 `ultra` 的模型（Claude、Kimi、MiMo、Hunyuan）的区别在于另一头——它保留 `max`。
 
 未知模型 ID（不在静态表里的）同样会拿到思考等级列表，因为网关对它服务的每个模型都接受这个参数；隐藏选择器反而会让比本版本更新的 ID 少一个能力。
 

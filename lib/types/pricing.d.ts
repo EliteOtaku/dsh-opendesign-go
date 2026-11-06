@@ -14,7 +14,7 @@
  */
 import type { ModelPrice } from './usage-ledger.ts';
 /** When this snapshot was read from the public endpoint. */
-export declare const PRICES_AS_OF = "2026-10-19";
+export declare const PRICES_AS_OF = "2026-11-07";
 /** Endpoint that serves the live list. */
 export declare const PRICES_URL = "https://amr-api.open-design.ai/api/v1/public/model-prices";
 /** Price per million tokens in USD, keyed by exact model id. */

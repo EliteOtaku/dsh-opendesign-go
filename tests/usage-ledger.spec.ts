@@ -23,10 +23,15 @@ function entry(overrides: Partial<LedgerEntry> = {}): LedgerEntry {
 
 describe('price list', () => {
   it('carries the models the gateway actually serves', () => {
-    expect(BASE_PRICES.length).toBe(35)
+    expect(BASE_PRICES.length).toBe(36)
     const flash = priceOf('deepseek-v4.1-flash')
     expect(flash?.input).toBe(0.3)
     expect(flash?.output).toBe(1.2)
+    // The slow tier is priced as the model it mirrors, not as a discount.
+    const eco = priceOf('deepseek-v4.1-flash-eco')
+    expect(eco?.input).toBe(flash?.input)
+    expect(eco?.output).toBe(flash?.output)
+    expect(eco?.cacheRead).toBe(flash?.cacheRead)
   })
 
   it('returns undefined for an unknown model instead of guessing a price', () => {

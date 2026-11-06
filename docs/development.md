@@ -46,7 +46,7 @@ src/
   index.ts              入口：apply(ctx)，注册路由、额度、账本、设置页
   adapter.ts            LlmAdapter 实现：listModels / resolveModel / stream
   conversion.ts         Chat Completions 的请求投影（含图片）
-  catalog.ts            12 个模型的静态目录
+  catalog.ts            13 个模型的静态目录
   model-params.ts       每模型默认参数、覆盖解析、思考等级
   config.ts             schemastery schema（volatile 热更新）
   config-contract.ts    两端共用的配置类型与常量
@@ -95,7 +95,7 @@ node scripts/link-profile.mjs --profile desktop
 设置页的「路由状态」一行会说明原因：
 
 ```
-已注册/未注册 · 启用=true/false · 凭据=已解析/未解析（引用名）· 声明模型 12 个
+已注册/未注册 · 启用=true/false · 凭据=已解析/未解析（引用名）· 声明模型 13 个
 ```
 
 三种情况都能看到：

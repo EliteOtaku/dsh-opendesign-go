@@ -2,6 +2,26 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 0.1.12
+
+新增 `deepseek-v4.1-flash-eco`。
+
+### 一个慢速档
+
+OpenDesign 把 DeepSeek V4.1 Flash 的低速线路单独挂了一个 ID。厂商侧没有这个 ID——[定价页](https://open-design.ai/pricing/)列它为「DeepSeek V4.1 Flash Eco」，[额度页](https://open-design.ai/model-credits/)写明「may respond more slowly at times」，建议批处理。所以这一行的参数不是抄来的官方数，而是「参数同 V4.1-Flash」加实测确认：`max_tokens: 384000` 返 200，窗口与输出上限沿用同一个模型。
+
+### 它少一档思考等级
+
+`ultra` 对它返回 400。这不是偶发：五轮 base/eco 交替实测里，eco 每次都在一秒内返回 `[code=upstream_error]`，同一时刻 base 五轮全部 200。它是 **DeepSeek 系列里唯一没有 `ultra` 的一档**，因此清单单独列一行，不与 `kimi-k2.7-code` 那组「`none` 到 `xhigh`」合并——那一组连 `max` 都没有，而 eco 保留 `max`。如果不按模型过滤，选 `ultra` 的请求会稳定失败。
+
+### 便宜在额度倍率上，不在单价上
+
+公开价目表给 eco 的价格与 V4.1-Flash 逐项相同（输入 0.3 / 输出 1.2 / 缓存读 0.006 USD per 1M token），线上 `model-prices` 端点也确实发布同一组数。差别在订阅额度：额度页的 credit 倍率是 0.27× 对 0.5×。本地账本按公开单价估算、不乘倍率，所以两个模型的金额估算相同——这是账本口径的边界，不是漏算。
+
+### 网关的模态元数据是错的
+
+`/v1/models` 给 eco 的 `architecture.input_modalities` 是 `["text"]`，但它实际能读图：红/蓝/绿三张纯色图全部答对，左紫右黄的双色图答「purple 和 yellow」，左侧黑竖条答「A black vertical stripe on the left and a large white area」。这与它把 `metadata.output_budget` 报成 128000 是同一类问题——广播元数据不等于真实能力，因此没有采用，模态依据改为实测记录。
+
 ## 0.1.11
 
 两处正确性修正。

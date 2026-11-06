@@ -46,11 +46,12 @@ export interface ModelParamOverride {
  * Model limits, taken from each vendor's own documentation.
  *
  * These are pass-through models, not a re-implementation: the gateway serves
- * `deepseek-v4.1-flash` as `deepseek-flash`, and both return the same
- * `system_fingerprint` (`e72d3c7f663d3e1383b00b3884cb4501`) as
- * `api.deepseek.com`. A request with `max_tokens: 384000` is accepted, so the
- * 128000 in the gateway's `metadata.output_budget` is broadcast metadata rather
- * than an enforced limit — using it would under-report what the model can do.
+ * `deepseek-v4.1-flash` as `deepseek-flash`. It also used to return DeepSeek's
+ * own `system_fingerprint`, which is what pinned the pass-through; that field is
+ * now an empty string on both ids, so the standing evidence is behavioural — a
+ * request with `max_tokens: 384000` is accepted, which makes the 128000 in the
+ * gateway's `metadata.output_budget` broadcast metadata rather than an enforced
+ * limit. Using it would under-report what the model can do.
  *
  * Where a vendor publishes 384K output and 1M context, those are the numbers
  * here. DeepSeek's docs also note that `deepseek-v4-flash` and
@@ -73,6 +74,19 @@ export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
   // The same pricing table's 功能 row marks 图像理解 as 不支持 for V4-Pro.
   'deepseek-v4-pro': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
   'deepseek-v4.1-flash': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','ultra','max'] },
+  // The slow tier of the model above, so everything it inherits comes from the
+  // same vendor table. DeepSeek documents neither the id nor its limits: the
+  // name and the tier itself are OpenDesign's (https://open-design.ai/pricing/
+  // lists "DeepSeek V4.1 Flash Eco" and https://open-design.ai/model-credits/
+  // warns it "may respond more slowly at times", recommending it for batch
+  // work). Everything else here was probed against the same gateway: every
+  // effort base takes is accepted except `ultra`, which fails deterministically
+  // with `[code=upstream_error]` in under a second across five rounds, so the
+  // list stops at `max` without `ultra`; `max_tokens: 384000` is accepted; and
+  // images are read correctly (a purple/yellow split answers "purple and
+  // yellow"), making the gateway's `input_modalities: ["text"]` for this id
+  // wrong in the same way its output_budget was.
+  'deepseek-v4.1-flash-eco': { contextWindow: 1_000_000, maxTokens: 384_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','max'] },
   // docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash and its English mirror
   // docs.z.ai/guides/vlm/glm-5.3-flash both state 1M context, 128K max output.
   'glm-5.3-flash': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['low','high','max'] },

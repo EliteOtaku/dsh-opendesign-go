@@ -17,17 +17,20 @@ describe('gateway model defaults', () => {
   it('covers every model the Go plan grants', () => {
     // A model without defaults loses its context display and output cap, which
     // silently truncates conversations instead of failing visibly.
-    expect(Object.keys(MODEL_DEFAULTS)).toHaveLength(12)
+    expect(Object.keys(MODEL_DEFAULTS)).toHaveLength(13)
   })
 
   it('uses the vendor-published DeepSeek limits, not the gateway metadata', () => {
     // DeepSeek documents 1M context and a 384K output maximum. The gateway's
     // metadata.output_budget says 128000, but a request asking for 384000 is
-    // accepted, so that field is broadcast metadata rather than a limit — and
-    // both endpoints return the same system_fingerprint, so this is the same
-    // model behind a pass-through.
+    // accepted, so that field is broadcast metadata rather than a limit. The
+    // shared system_fingerprint that once proved the pass-through is now an
+    // empty string on both ids, so behaviour is the standing evidence.
     expect(MODEL_DEFAULTS['deepseek-v4.1-flash']?.contextWindow).toBe(1_000_000)
     expect(MODEL_DEFAULTS['deepseek-v4.1-flash']?.maxTokens).toBe(384_000)
+    // The slow tier mirrors the same vendor row; DeepSeek documents neither, so
+    // the 384000 here was confirmed by sending it (accepted, HTTP 200).
+    expect(MODEL_DEFAULTS['deepseek-v4.1-flash-eco']?.maxTokens).toBe(384_000)
     expect(MODEL_DEFAULTS['deepseek-v4-pro']?.maxTokens).toBe(384_000)
   })
 
@@ -65,8 +68,12 @@ describe('gateway model defaults', () => {
     // silently downcasts an image to placeholder text.
     const image = [
       // deepseek.com pricing table marks 图像理解 支持 for deepseek-flash, and
-      // docs list PNG/JPEG/GIF/WebP for it.
+      // docs list PNG/JPEG/GIF/WebP for it. The eco tier is the same model at a
+      // slower speed tier; DeepSeek never documents the id, so this row rests on
+      // a direct probe — a purple/yellow split answered "purple and yellow" —
+      // and the gateway's own `input_modalities: ["text"]` is wrong for it.
       'deepseek-v4.1-flash',
+      'deepseek-v4.1-flash-eco',
       // Both retired ids are served by DeepSeek-V4.1-Flash-1017, so they inherit
       // its image support. One was previously declared text-only, which
       // described the same backend two different ways.
@@ -197,6 +204,17 @@ describe('reasoning efforts', () => {
     const deepseek = MODEL_DEFAULTS['deepseek-v4.1-flash']
     expect(deepseek?.reasoningEfforts).toContain('ultra')
     expect(deepseek?.reasoningEfforts).toContain('max')
+
+    // The eco tier refuses `ultra` and takes everything else the base model
+    // takes: five interleaved rounds each returned 400 in under a second with
+    // `[code=upstream_error]`, while the base returned 200 in every round. A
+    // single shared list would have produced a 400 for every eco request made
+    // at that level.
+    const eco = MODEL_DEFAULTS['deepseek-v4.1-flash-eco']
+    expect(eco?.reasoningEfforts).not.toContain('ultra')
+    expect(eco?.reasoningEfforts).toEqual(
+      deepseek?.reasoningEfforts.filter((effort) => effort !== 'ultra'),
+    )
 
     // GLM answers 400 outside these three.
     expect(MODEL_DEFAULTS['glm-5.3-flash']?.reasoningEfforts).toEqual(['low', 'high', 'max'])
