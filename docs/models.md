@@ -99,11 +99,10 @@
 | 模型 | 支持的推理等级 |
 | --- | --- |
 | deepseek-v4.1-flash、deepseek-v4-flash、deepseek-v4-flash-vision-exp、deepseek-v4-pro、gpt-6-luna | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`ultra`、`max` |
-| claude-haiku-5.5、kimi-k2.7-code、mimo-v2.6-flash、mimo-v2.6-pro、hy4-preview | `none` 到 `xhigh`（无 `ultra`） |
-| deepseek-v4.1-flash-eco | `none` 到 `xhigh`，另有 `max`（无 `ultra`） |
+| claude-haiku-5.5、kimi-k2.7-code、mimo-v2.6-flash、mimo-v2.6-pro、hy4-preview、deepseek-v4.1-flash-eco | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`（跳过 `ultra`） |
 | glm-5.3-flash、glm-5.3-flashx | 仅 `low`、`high`、`max` |
 
-选到该模型不支持的值，网关会返回 400。因此插件按模型过滤列表，并把默认等级钳制在合法范围内。`deepseek-v4.1-flash-eco` 是 **DeepSeek 系列里唯一没有 `ultra` 的一档**（其余四个 DeepSeek ID 与 GPT-6 Luna 都有）：五轮交替实测中它对 `ultra` 每次都在一秒内返回 400（`[code=upstream_error]`），同一时刻 base 五轮全部 200。它与其他没有 `ultra` 的模型（Claude、Kimi、MiMo、Hunyuan）的区别在于另一头——它保留 `max`。
+选到该模型不支持的值，网关会返回 400。因此插件按模型过滤列表，并把默认等级钳制在合法范围内。`deepseek-v4.1-flash-eco` 的等级集合与上表中间那行五个模型**完全相同**，但它之所以单独记一次，是因为它是 **DeepSeek 系列里唯一没有 `ultra` 的一档**：五轮交替实测中它对 `ultra` 每次都在一秒内返回 400（`[code=upstream_error]`），同一时刻 `deepseek-v4.1-flash` 五轮全部 200。同一个模型的快慢两档在思考等级上出现差异，这件事本身是参数表必须按模型存、不能按系列推断的理由。
 
 未知模型 ID（不在静态表里的）同样会拿到思考等级列表，因为网关对它服务的每个模型都接受这个参数；隐藏选择器反而会让比本版本更新的 ID 少一个能力。
 

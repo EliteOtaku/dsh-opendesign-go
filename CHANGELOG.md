@@ -12,7 +12,9 @@ OpenDesign 把 DeepSeek V4.1 Flash 的低速线路单独挂了一个 ID。厂商
 
 ### 它少一档思考等级
 
-`ultra` 对它返回 400。这不是偶发：五轮 base/eco 交替实测里，eco 每次都在一秒内返回 `[code=upstream_error]`，同一时刻 base 五轮全部 200。它是 **DeepSeek 系列里唯一没有 `ultra` 的一档**，因此清单单独列一行，不与 `kimi-k2.7-code` 那组「`none` 到 `xhigh`」合并——那一组连 `max` 都没有，而 eco 保留 `max`。如果不按模型过滤，选 `ultra` 的请求会稳定失败。
+`ultra` 对它返回 400。这不是偶发：五轮 base/eco 交替实测里，eco 每次都在一秒内返回 `[code=upstream_error]`，同一时刻 `deepseek-v4.1-flash` 五轮全部 200。它是 **DeepSeek 系列里唯一没有 `ultra` 的一档**，其余四个 DeepSeek ID 都有。同一个模型的快慢两档在思考等级上出现差异，正好说明这张表必须按模型存、不能按系列推断；如果不按模型过滤，选 `ultra` 的请求会稳定失败。
+
+顺带修正文档里一处旧错：`none` 到 `xhigh` 那一组（Claude Haiku 5.5、Kimi K2.7 Code、MiMo 两个型号、Hy4 Preview）在代码里一直带 `max`，文档却写成止于 `xhigh`。现在按代码写明。
 
 ### 便宜在额度倍率上，不在单价上
 
