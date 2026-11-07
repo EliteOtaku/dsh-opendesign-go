@@ -26,7 +26,10 @@
 参数的取值依据（代码注释里保留了出处）：
 
 - **DeepSeek 系**：1M 上下文、384K 输出。`deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 是已退役 ID，官方文档的脚注明确两者都由 DeepSeek-V4.1-Flash-1017 承接，因此这两个 ID 的参数**与图片能力**都同 V4.1-Flash。`deepseek-v4-pro` 是另一个模型，官方价格表的「图像理解」一行对它标的是**不支持**。实测 `max_tokens: 384000` 会被接受，网关 `metadata.output_budget` 里的 128000 只是广播元数据，不是硬限制。
+
+  厂商 `/models` 端点给 `deepseek-flash` 报的是 `context_window: 1048576`、`max_output_tokens: 393216`，与这里记的 1,000,000 / 384,000 差在两个不同的地方。输出上限**是同一个数**：`393216 = 384 × 1024`，价格页写「384K」，端点写 KiB 精确值。eco 正好卡在这个点上被验证——`393216` 返 200、`393217` 返 400，而 base 一直放到 `1048576` 都不拒，说明这个界不是网关自己加的。上下文窗口则**真的不一样**：`1048576 = 1 Mi` 比 `1,000,000` 大约 4.86%，这里仍取价格页的十进制 1M，因为插件报给宿主的是「窗口 − 输出预留」，用小的那个更保守，不会让宿主晚一步压缩。
 - **DeepSeek V4.1 Flash Eco**：**DeepSeek 官方文档里没有这个 ID**。它是 OpenDesign 侧的慢速档，定价页把它列进 Design Plan 模型并注明「速度较慢」，[额度页](https://open-design.ai/model-credits/)的说法是「may respond more slowly at times」，建议用于批处理。所以上下文与输出上限没有厂商出处，只有实测依据：`max_tokens: 384000` 返 200，与 V4.1-Flash 相同；网关给它的 `metadata` 也与 V4.1-Flash 逐字段相同（`context_limit 1048000`、`context_budget 328000`）。表格里的 1,000,000 / 384,000 是这两条加上「参数同 V4.1-Flash」的合并结论，不是独立公布值。
+  - 它的输出上限**能被探到硬边**：`393216` 返 200、`393217` 返 400，正是 384 Ki。同一个 `max_tokens` 丢给 base 一路到 `1048576` 都不拒，所以这个界是 eco 自己带的，不是网关统一加的。表里记的 384,000 落在这条线下方，两边都安全。
   - 价格与 V4.1-Flash 逐项相同：输入 0.3 / 输出 1.2 / 缓存读 0.006 USD per 1M token。
   - 但**订阅额度的扣减倍率不同**：额度页给 eco 的 Design Plan credit 倍率是 0.27×，V4.1-Flash 是 0.5×。同样的工作量消耗更少的订阅额度，「慢速档更便宜」指的是这件事。本地账本按公开价目表估算、不乘倍率，所以两个模型的金额估算相同。
 - **Claude Haiku 5.5**：1M 上下文（比早期的 200K 放宽）、128K 输出。超限时端点会报 `maximum context length is 1000000 tokens`，这条独立印证了上下文数字。
@@ -84,7 +87,7 @@
 
 ## 思考等级
 
-等级由弱到强共八个，每个模型只展示它接受的那部分：
+等级由弱到强共八个，每个模型只展示它接受的那部分。**八个值不等于八种强度**：其中七个别名折叠到三档真实强度上，详见本节末尾。
 
 | ID | 显示名 | 说明 |
 | --- | --- | --- |
@@ -97,7 +100,7 @@
 | `ultra` | 极高 | 仅 DeepSeek 系列与 GPT-6 Luna（不含 Flash Eco） |
 | `max` | 最高 | |
 
-每个模型只显示它真正支持的推理等级，列表来自网关自己的拒绝信息：发送一个非法值，返回的错误里会写明该模型的合法取值集合。网关没有公开文档说明这个字段，实测是唯一可靠来源。
+每个模型只显示它真正支持的推理等级。网关没有公开文档说明这个字段，取值是**逐个值探出来的**：发一次看 200 还是 400，没有捷径——网关对非法值的回包不列举合法集合，只是 `[code=invalid_request_error] The request is invalid. Please check the request parameters.`（部分上游模型包成 `[code=upstream_error]`）。所以表里每一行的边界都是探针结果，不是从错误信息里读出来的。
 
 | 模型 | 支持的推理等级 |
 | --- | --- |
@@ -112,6 +115,42 @@
 
 - `deepseek-v4.1-flash-eco` 的集合与中间那行五个模型**完全相同**，但它是 **DeepSeek 系列里唯一没有 `ultra` 的一档**：五轮交替实测它对 `ultra` 每次都在一秒内返回 400（`[code=upstream_error]`），同一时刻 `deepseek-v4.1-flash` 五轮全部 200。同一个模型的快慢两档在思考等级上出现差异，这件事本身就是参数表必须按模型存、不能按系列推断的理由。
 - `minimax-m3.1-flash` 是唯一**两端都被削掉**的：`none` 三次全部 400，与厂商文档说它「requires adaptive thinking」吻合，所以它的列表从 `minimal` 起步；`ultra` 同样被拒，于是止于 `max`。它是三组之外的新形状，不能并入任何一行。
+
+### 八档里只有三档是真的强
+
+「接受」不等于「有区别」。DeepSeek 的[思考模式文档](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)自己给了映射表：`minimal`/`low` → low、`medium`/`high`/`xhigh` → high、`max`/`ultra` → max。也就是说七个中间值只落在三档强度上。
+
+在这个网关上量 `reasoning_tokens`（同一 prompt 交错采样、temperature 0）确实复现了这三组：
+
+| 模型 | n | 实测均值（`reasoning_tokens`） | 统计上可区分的配对（z>2.5） |
+| --- | --- | --- | --- |
+| `deepseek-v4.1-flash` | 10 | low 756 < minimal 881 < high 1158 < xhigh 1277 < medium 1280 ≪ max 4402 < ultra 5020 | `max−high` z=7.95、`medium−minimal` z=3.63 |
+| `deepseek-v4.1-flash-eco` | 8 | low 1316 < minimal 1140 < xhigh 1496 < medium 1510 < high 1701 ≪ max 5286 | `max−high` z=9.45、`medium−minimal` z=2.36 |
+| `deepseek-v4.1-flash`（`/responses`） | 6 | low 955 < minimal 1048 < high 1150 < xhigh 1247 < medium 1453 < ultra 2325 < max 3081 | 仅 `max−high` z=3.86 |
+
+三组内部（`minimal↔low`、`medium↔high↔xhigh`、`ultra↔max`）在各次采样里都不可区分，组与组之间才分得开。**结论：8 个合法值折叠成 3 档真实强度，与厂商映射表一致**，网关在这里没有发明自己的分档。
+
+既然映射关系成立，为什么不把列表缩成 `low`/`high`/`max` 三个？三个理由：
+
+- 缩表会**改掉默认档的语义**。插件默认 `medium`，它映射到 high；若只剩三档，`medium` 不在列表里，默认值会被钳到 `low`——所有用户的默认思考强度会静默下降一档。
+- 八个值**都合法**，写全不会导致请求失败；`ultra` 的例外只有 eco，而 eco 已在它自己那一行减去。
+- 别名有实际用途：`medium`/`xhigh` 都落在 high，但换别名不等价于白换——`xhigh` 的实测均值始终略高于 `high`（三组数据里都是），只是这个差在单次采样噪声里分不出来。
+
+所以这张表描述的是**该模型接受哪些值**，不是「有几种强度」。这两件事必须分开看，否则会得出「插件谎报 8 档」的错误结论。
+
+### `none` 关不关思考：看协议
+
+厂商文档说 OpenAI 协议下 `reasoning_effort: "none"` 不关思考、要关得用 `thinking: {type: "disabled"}`。**这个网关的行为正好相反**，两边都是 4/4 稳定：
+
+| 发送的字段 | `deepseek-v4.1-flash` | `deepseek-v4.1-flash-eco` |
+| --- | --- | --- |
+| `reasoning_effort: "none"` | `reasoning_tokens` 全为 0 | 全为 0 |
+| `thinking: {type: "disabled"}` | 仍思考（18/18/18/19） | 仍思考（18/20/17/18） |
+| `thinking: {type: "disabled"}` + `effort: "none"` | 全为 0 | 全为 0 |
+
+`thinking` 字段在这个网关上被**静默忽略**——发 `thinking: {type: "disabled"}` 不报错、也不生效；只有 `reasoning_effort` 真的能关掉思考。所以插件只发 `reasoning_effort`、不发 `thinking` 是**对的**，而且有额外理由：`minimax-m3.1-flash` 对这个 ID 本来就拒绝 `none`（三发三中 400），同时再带上 `thinking` 不会让它变好，只会让发出去的请求多一个没有作用的字段。
+
+代价是这张表**绑定了当前网关**。如果哪天 OpenDesign 把 `thinking` 接通、或让 `none` 不再关思考，插件里「关闭」这一档的语义就会变，需要重新探针。
 
 未知模型 ID（不在静态表里的）同样会拿到思考等级列表，因为网关对它服务的每个模型都接受这个参数；隐藏选择器反而会让比本版本更新的 ID 少一个能力。
 

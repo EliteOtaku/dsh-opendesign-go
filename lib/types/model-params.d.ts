@@ -82,13 +82,19 @@ export declare function paramsOf(model: string, overrides: Readonly<Record<strin
 /**
  * Every reasoning effort any model on this plan accepts, ordered weakest first.
  *
- * Discovered by sending an invalid value and reading the gateway's own rejection,
- * which lists the accepted set per model — the gateway publishes no documentation
- * for this field. The order is what a picker renders, so it runs none → max.
+ * Established one value at a time against the gateway: an accepted value answers
+ * 200 and a rejected one answers 400. The rejection body does **not** enumerate
+ * the legal set — it is the bare `[code=invalid_request_error] The request is
+ * invalid. Please check the request parameters.` — so each entry in
+ * {@link MODEL_DEFAULTS} is a probe result, not a value read out of an error. The
+ * order is what a picker renders, so it runs none → max.
  *
- * `none` is absent from the old four-value list this file used to carry, and
- * `ultra`/`max` were both missing, which is why the highest selectable effort for
- * DeepSeek sat two steps below what the model actually accepts.
+ * Accepted is not the same as distinct. DeepSeek's own thinking-mode guide maps
+ * seven of these onto three strengths (`minimal`/`low` → low, `medium`/`high`/
+ * `xhigh` → high, `max`/`ultra` → max), and measuring `reasoning_tokens` on this
+ * gateway reproduces exactly those three groups. The full list is kept anyway:
+ * every value is legal, and dropping the aliases would silently move anyone on
+ * the default `medium` down to `low`.
  */
 export declare const REASONING_EFFORTS: readonly [{
     readonly id: "none";

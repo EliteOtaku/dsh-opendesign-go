@@ -205,7 +205,8 @@ Go 套餐授予 14 个 Design Plan 模型。默认参数取自各厂商文档，
 - 覆盖值的允许范围：上下文窗口 1,000–10,000,000，输出上限 1–1,000,000。越界会被拒绝并提示，不会静默截断。
 - 请求没有显式给出 `maxTokens` 时，插件用上表的输出上限作为 `max_tokens`，**再按本次请求的实际输入钳制**——网关要求 `输入 + max_tokens ≤ 窗口`，不钳制就会在长对话里被拒。
 - 设置页的模型行会同时显示「可用输入」，即 `窗口 − max(输出上限, 窗口/4)`。改 `max_tokens` 时能立刻看到自己拿多少输入去换了多少输出。
-- 思考等级按模型给出，取自网关对每个模型实际接受的集合，见 [docs/models.md](docs/models.md)。
+- 思考等级按模型给出，取自网关对每个模型实际接受的集合，见 [docs/models.md](docs/models.md)。**八个可选值不等于八种强度**：按 DeepSeek 官方映射表，`minimal`/`low`、`medium`/`high`/`xhigh`、`max`/`ultra` 各折叠到同一档，网关上实测的 `reasoning_tokens` 也正好分成这三组。插件保留全部八个合法值，是因为缩表会让默认档 `medium` 被钳到 `low`，静默降低默认思考强度。
+- 插件只发 `reasoning_effort`，不发厂商文档里的 `thinking` 字段。原因是实测：这个网关**忽略** `thinking`（发了也不生效、不报错），而 `reasoning_effort: none` 确实关闭思考——两个 DeepSeek ID 各四轮，`none` 的 `reasoning_tokens` 全为 0，`thinking: disabled` 的四轮全都还在思考。
 - **「图片输入」一列取自 `src/model-params.ts` 的 `MODEL_DEFAULTS`**，厂商文档是首选依据，出处逐条列在 [docs/models.md](docs/models.md)；唯一例外是 `deepseek-v4.1-flash-eco`，厂商没有这个 ID，该行依据实测（纯色图与双色图识别全部正确）。会话选择器、参数解析和请求门控都读这张表，因此列表里显示的图片能力与实际能否发送图片一致。文本模型收到图片时会得到占位文本，不会把图片字节发给网关。
 
 更多细节见 [docs/models.md](docs/models.md)。

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BlockAssembler,
   LlmError,
+  ReasoningEffortId,
   ToolCallId,
   createAssistantMessage,
   createSystemMessage,
@@ -326,6 +327,47 @@ describe('OpenDesignAdapter.stream', () => {
 
     expect(failure).toBeInstanceOf(LlmError)
     expect(failure).toMatchObject({ code: 'AUTH' })
+  })
+
+  it('sends only `reasoning_effort`, never the vendor `thinking` switch', async () => {
+    // The vendor guide documents `thinking: {type: "disabled"}` as the way to turn
+    // thinking off, and says `reasoning_effort: "none"` does not. This gateway is
+    // the other way round: `none` yields reasoning_tokens 0 on four of four
+    // rounds, while `thinking: {type: "disabled"}` is ignored (reasoning stays on)
+    // — and sending both breaks some upstream models outright (minimax answers
+    // 400, deepseek-v4-pro and deepseek-v4-flash answer 500). Sending only the
+    // effort field is therefore deliberate, not an omission.
+    const fetchMock = stubFetch(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    await collect(adapterWith().stream(request({ reasoningEffort: ReasoningEffortId('none') })))
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1].body)) as Record<string, unknown>
+    expect(body.reasoning_effort).toBe('none')
+    expect(body).not.toHaveProperty('thinking')
+    expect(body).not.toHaveProperty('reasoning')
+  })
+
+  it('omits the effort field entirely when the caller names none', async () => {
+    // Leaving the field out is what lets the provider apply its own default
+    // (DeepSeek documents `high`). Sending a value the picker never showed would
+    // override that default with the plugin's guess.
+    const fetchMock = stubFetch(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    await collect(adapterWith().stream(request()))
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1].body)) as Record<string, unknown>
+    expect(body).not.toHaveProperty('reasoning_effort')
+    expect(body).not.toHaveProperty('thinking')
   })
 
   it('fails with EMPTY_RESPONSE when the stream carried no content', async () => {

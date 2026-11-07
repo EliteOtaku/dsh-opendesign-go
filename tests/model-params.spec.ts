@@ -196,17 +196,34 @@ describe('enabled models', () => {
 
 describe('reasoning efforts', () => {
   it('offers every effort some model accepts, weakest first', () => {
-    // The gateway names its accepted set in the rejection message for an invalid
-    // value; this list is the union across models. It previously held only four
-    // values, which put DeepSeek's ceiling two steps below what it accepts and
-    // omitted `none` entirely.
+    // Established one value at a time: an accepted value answers 200, a rejected
+    // one answers 400. The rejection body does not list the legal set, so this
+    // union is the product of per-value probes, not of one error message. The
+    // list previously held only four values, which put DeepSeek's ceiling two
+    // steps below what it accepts and omitted `none` entirely.
     expect(REASONING_EFFORTS.map((effort) => effort.id)).toEqual([
       'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra', 'max',
     ])
   })
 
+  it('keeps the aliases that collapse onto three real strengths', () => {
+    // DeepSeek's own mapping table folds three groups onto low/high/max:
+    // minimal|low -> low, medium|high|xhigh -> high, max|ultra -> max. Measured
+    // reasoning_tokens on this gateway reproduce exactly those groups, so the
+    // alias values are accepted-but-equivalent, not distinct strengths.
+    //
+    // The full list is kept on purpose: collapsing it to low/high/max would drop
+    // `medium`, which is DEFAULT_REASONING_EFFORT, and the clamp in the adapter
+    // would silently hand every user `low` instead of `high`.
+    expect(REASONING_EFFORTS.some((effort) => effort.id === DEFAULT_REASONING_EFFORT)).toBe(true)
+    const ids = REASONING_EFFORTS.map((effort) => effort.id)
+    expect(ids).toContain('medium')
+    expect(ids.filter((id) => ['minimal', 'low', 'medium', 'high', 'xhigh', 'ultra', 'max'].includes(id))).toHaveLength(7)
+  })
+
   it('gives each model only the efforts the gateway accepts for it', () => {
-    // Verified per model by sending an invalid value and reading the rejection.
+    // Every boundary below is a probe result: the value was sent and the answer
+    // was 200 or 400. No rejection message enumerated the set for us.
     const deepseek = MODEL_DEFAULTS['deepseek-v4.1-flash']
     expect(deepseek?.reasoningEfforts).toContain('ultra')
     expect(deepseek?.reasoningEfforts).toContain('max')
@@ -246,9 +263,5 @@ describe('reasoning efforts', () => {
     for (const [model, params] of Object.entries(MODEL_DEFAULTS)) {
       expect(params.reasoningEfforts.length, model).toBeGreaterThan(0)
     }
-  })
-
-  it('names a default that is one of the offered values', () => {
-    expect(REASONING_EFFORTS.some((effort) => effort.id === DEFAULT_REASONING_EFFORT)).toBe(true)
   })
 })

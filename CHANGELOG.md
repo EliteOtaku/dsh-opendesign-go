@@ -55,6 +55,56 @@ CI 从 0.1.10 起每一轮都失败，报的都是一句 `check:dist: lib/ is ou
 
 回归测试 `tests/client-bundle.spec.ts` 增加一条断言：`lib/client.js` 里不得出现盘符路径或 `/home/`、`/Users/`、`/root/`、`/builds/`、`/runner/` 这类前缀。这条断言只认这些前缀，`https://` 之类正常文本不会误报。
 
+## 0.1.13
+
+按 DeepSeek 官方的[思考模式文档](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)复核了思考等级。**运行时行为没有任何改变**——这一版改的是依据、注释、测试和文档；模型的参数表、请求体、默认档全部原样。
+
+### 思考等级的八个值只有三档强度
+
+官方文档给了映射表：`minimal`/`low` → low、`medium`/`high`/`xhigh` → high、`max`/`ultra` → max。照这张表，插件展示的八个档位其实只落在三档强度上。这是不是「插件谎报 8 档」？在网关上量 `reasoning_tokens` 把这件事定下来了：
+
+| 模型 | n | 可区分的配对（z>2.5） |
+| --- | --- | --- |
+| `deepseek-v4.1-flash`（`/chat/completions`） | 10 | `max−high` z=7.95、`medium−minimal` z=3.63 |
+| `deepseek-v4.1-flash-eco`（`/chat/completions`） | 8 | `max−high` z=9.45、`medium−minimal` z=2.36 |
+| `deepseek-v4.1-flash`（`/responses`） | 6 | `max−high` z=3.86 |
+
+三组内部（`minimal↔low`、`medium↔high↔xhigh`、`ultra↔max`）每次都不可区分，组与组之间才分得开——**与厂商映射表逐组吻合**。所以网关没有发明自己的分档，八个值确实是三档强度加上五个别名，官方文档与网关行为在这个问题上**一致**，不存在「router 错了」。
+
+**列表保持八个不变**，理由是缩表会改语义：默认档是 `medium`（映射到 high），若只剩 `low`/`high`/`max`，`medium` 不在列表里，适配器会把默认值钳到 `low`，所有用户默认的思考强度静默下降一档。八个值全部合法，写全不会让任何请求失败；`ultra` 的例外只有 eco，而 eco 那一行早就没有它。文档现在把「接受哪些值」和「有几种强度」分开写清楚。
+
+### `none` 关不关思考，跟厂商文档相反
+
+厂商文档说 OpenAI 协议下 `reasoning_effort: "none"` 不关思考、要关得用 `thinking: {type: "disabled"}`。**这个网关正好相反**，两个 DeepSeek ID 各四轮、稳定复现：
+
+| 发送的字段 | `deepseek-v4.1-flash` | `-eco` |
+| --- | --- | --- |
+| `reasoning_effort: "none"` | `reasoning_tokens` 0/0/0/0 | 0/0/0/0 |
+| `thinking: {type: "disabled"}` | 仍思考（18/18/18/19） | 仍思考（18/20/17/18） |
+| 两者同时发 | 0/0/0/0 | 0/0/0/0 |
+
+`thinking` 被静默忽略：不报错，也不生效。所以适配器只发 `reasoning_effort`、不发 `thinking` 是这个网关上的正确实现，不是漏做。这次补了两条测试把结论钉住——带档位时 `reasoning_effort` 必须出现、`thinking`/`reasoning` 必须不出现；不带档位时三个字段都不出现，让厂商自己的默认值生效。日后有人「照官方文档」把 `thinking` 加进去，测试会拦下来。
+
+代价写进了文档：这套语义**绑定当前网关**。若 OpenDesign 哪天把 `thinking` 接通、或让 `none` 不再关思考，「关闭」这一档就得重新探针。
+
+### 顺带修正文档里一处不实说法
+
+`docs/models.md` 原来写「列表来自网关自己的拒绝信息：发送一个非法值，返回的错误里会写明该模型的合法取值集合」。**这是错的**：非法值的回包只有 `[code=invalid_request_error] The request is invalid. Please check the request parameters.`（部分上游包成 `[code=upstream_error]`），一个字都不列举合法值。那张表是**逐个值发出去看 200 还是 400** 探出来的。代码注释与测试注释里的同款说法一并改掉。
+
+### 两处数字对上了
+
+厂商 `/models` 给 `deepseek-flash` 报 `context_window: 1048576`、`max_output_tokens: 393216`，与插件记的 1,000,000 / 384,000 看着不像。查清了：输出上限**是同一个数**（`393216 = 384 × 1024`，价格页写「384K」），上下文**真的不一样**（`1048576` 比 1,000,000 大 4.86%），这里仍取小的那个，因为插件报给宿主的是「窗口 − 输出预留」，用保守值不会让宿主晚一步压缩。eco 的输出上限另外被探到了硬边：`393216` 返 200、`393217` 返 400，而同一个 `max_tokens` 给 base 一路到 `1048576` 都不拒。
+
+### 没有换成 Responses 协议
+
+有反馈建议改用 `/responses`。实测这条链路在本网关可用——function calling、`data:` 流式事件、`input_image` 带图全部正常——但**换过去会亏**，所以没换：
+
+- **思维链会变成摘要**。`/responses` 的 `reasoning` 项给的是 `summary[].text`，实测拿到的文本是被截断改写的（`We need answer. Need think through maybe simple. 17*23 = 391. Need maybe show method. final concise. …`），而 `/chat/completions` 给的 `reasoning`/`reasoning_content` 是原始思维链。插件现在把思考块渲染给用户看，换协议等于把这个能力降级。
+- **省额度的老问题两边一样**。同一组英文 prompt、小预算测试里，`/chat/completions` 与 `/responses` 在预算 24 时都大面积返回空内容（7/12 与 9/12），预算 64 时都基本正常（2/12 与 1/12）。这不是协议的问题，是**思考 token 会吃光输出预算**，与厂商文档说的「思考模式独占 completion 预算」一致。
+- **八档折叠一模一样**。`/responses` 的 `reasoning_tokens` 也是三组（上表第三行），没有更细的分档。
+
+`/responses` 唯一比 `/chat/completions` 强的地方是截断信号更明确：它返回 `status: "incomplete"` + `incomplete_details.reason: "length"`，而不是只靠 `finish_reason`。插件已经把 `finish_reason: length` 映射成 `max-tokens`，所以这一点不构成迁移理由。
+
 ## 0.1.11
 
 两处正确性修正。
