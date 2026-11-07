@@ -47,6 +47,14 @@ OpenDesign 把 DeepSeek V4.1 Flash 的低速线路单独挂了一个 ID。厂商
 
 `gpt-6.1-terra` 有 `longContext` 阶梯（272,000 输入 token 之上翻倍），但 `ModelPrice` 没有第二个档位的字段，只能记基础档——这一点现在写进了 `src/pricing.ts` 的模块注释，与 `pricedAs: 'base-tier'` 的既有标注对应上。顺带删掉一句不实的注释：`PRICES_URL` 从来没有被运行时抓取过。
 
+### 构建产物不再携带构建机的路径
+
+CI 从 0.1.10 起每一轮都失败，报的都是一句 `check:dist: lib/ is out of date` + `differs from source: client.js`。根因不是构建脚本没有跑，而是**产物本身取决于检出目录**：CSS Modules 插件把样式表的绝对路径交给 lightningcss 当文件名，而它的 `[hash]` 是从文件名派生的，于是 `D:\AI\…` 与 `/home/runner/work/…` 生成出两套类名；esbuild 还会给插件命名空间里的每个模块打一行 `// <路径>` 注释，那条注释也把本地目录写进了 `lib/client.js`。
+
+改法是让模块身份与机器无关：解析阶段就把路径折成仓库内的相对 POSIX 路径，哈希改用 `[content-hash]`（由规则内容派生，而不是路径），真实路径只留给读取和 `watchFiles`。这样两份内容相同的样式表仍会各自注入、类名仍不冲突，但产物在任何机器上逐字节一致。
+
+回归测试 `tests/client-bundle.spec.ts` 增加一条断言：`lib/client.js` 里不得出现盘符路径或 `/home/`、`/Users/`、`/root/`、`/builds/`、`/runner/` 这类前缀。这条断言只认这些前缀，`https://` 之类正常文本不会误报。
+
 ## 0.1.11
 
 两处正确性修正。

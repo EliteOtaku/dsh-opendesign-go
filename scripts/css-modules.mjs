@@ -14,7 +14,7 @@
  * @module scripts/css-modules
  */
 import { readFileSync } from 'node:fs'
-import { basename, dirname, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { transform } from 'lightningcss'
 
 /**
@@ -26,19 +26,30 @@ export function cssModulesPlugin({ root, pkg }) {
   return {
     name: 'css-modules',
     setup(build) {
-      // A CSS module is resolved to an absolute path and handed to its own
-      // namespace, so esbuild's normal CSS pipeline never sees it.
+      // A CSS module is resolved to a project-relative id and handed to its own
+      // namespace, so esbuild's normal CSS pipeline never sees it. The id is
+      // relative on purpose: esbuild stamps each plugin-namespace module with a
+      // `// <path>` comment, and an absolute one would bake the checkout
+      // directory into the committed bundle.
       build.onResolve({ filter: /\.module\.css$/ }, (args) => ({
-        path: resolve(dirname(args.importer), args.path),
+        path: relative(root, resolve(dirname(args.importer), args.path)).split(sep).join('/'),
         namespace: 'css-module',
       }))
 
       build.onLoad({ filter: /.*/, namespace: 'css-module' }, (args) => {
+        // The id doubles as the hash seed. lightningcss derives `[hash]` from
+        // the whole file name it is given, so a machine-specific one would make
+        // the committed `lib/client.js` differ per checkout and fail
+        // `build.mjs --check` everywhere but the machine that built it.
+        // `[content-hash]` comes from the rules instead, which keeps the bundle
+        // byte-identical while still separating two files that happen to share
+        // a class name.
+        const id = args.path
         const compiled = transform({
-          filename: args.path,
-          code: readFileSync(args.path),
+          filename: id,
+          code: readFileSync(join(root, id)),
           minify: true,
-          cssModules: { pattern: '[hash]_[local]' },
+          cssModules: { pattern: '[content-hash]_[local]' },
         })
         /** `composes` chains are flattened onto the emitted class name. */
         const classes = {}
@@ -49,10 +60,9 @@ export function cssModulesPlugin({ root, pkg }) {
           const value = compiled.exports[local]
           classes[local] = [value.name, ...value.composes].join(' ')
         }
-        // The stylesheet is addressed by its own path rather than by content: two
-        // files with identical rules must still be injected once each, because
-        // their class names are what the components hold.
-        const id = relative(root, args.path).split(sep).join('/')
+        // The style tag is addressed by the same relative id rather than by
+        // content: two files with identical rules must still be injected once
+        // each, because their class names are what the components hold.
         const contents = [
           `const css = ${JSON.stringify(compiled.code.toString())}`,
           `const id = ${JSON.stringify(id)}`,
@@ -66,7 +76,10 @@ export function cssModulesPlugin({ root, pkg }) {
           `}`,
           `export default ${JSON.stringify(classes)}`,
         ].join('\n')
-        return { contents, loader: 'js', resolveDir: dirname(args.path), watchFiles: [args.path] }
+        // `resolveDir` and `watchFiles` still need the real location; only the
+        // generated module's own identity is relative.
+        const absolute = join(root, id)
+        return { contents, loader: 'js', resolveDir: dirname(absolute), watchFiles: [absolute] }
       })
     },
   }

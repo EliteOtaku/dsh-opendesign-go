@@ -34,4 +34,17 @@ describe('shipped client bundle', () => {
       expect(['react', 'react-dom', 'react/jsx-runtime'].includes(name) || name.startsWith('@deepseek-ai/')).toBe(true)
     }
   })
+
+  it('embeds no absolute path from the machine that built it', () => {
+    // The bundle is committed, so anything machine-specific in it makes
+    // `build.mjs --check` fail on every other checkout — which is exactly how CI
+    // broke: esbuild stamps namespace modules with `// <path>` comments, and an
+    // absolute resolve path put the builder's home directory in the artifact.
+    // Kept to the prefixes a build machine actually has, so an `https://` URL or
+    // a regex literal in the sources cannot trip it.
+    expect(source).not.toMatch(/\b[A-Za-z]:[\\/]/) // Windows drive path
+    for (const prefix of ['/home/', '/Users/', '/root/', '/builds/', '/runner/']) {
+      expect(source).not.toContain(prefix)
+    }
+  })
 })
