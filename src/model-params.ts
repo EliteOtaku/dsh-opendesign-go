@@ -105,6 +105,13 @@ export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
   // mimo.mi.com/docs/zh-CN/quick-start/summary/model: 1M context, 128K output.
   'mimo-v2.6-flash': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','max'] },
   'mimo-v2.6-pro': { contextWindow: 1_000_000, maxTokens: 128_000, inputModalities: ['text', 'image'], reasoningEfforts: ['none','minimal','low','medium','high','xhigh','max'] },
+  // platform.minimax.io/docs/guides/text-generation: 1M context. The model always
+  // thinks, so `none` is not an option — the gateway answers 400 every time it is
+  // sent, which matches the vendor note that this id "requires adaptive thinking".
+  // Its effort list is the only one in this table that starts at `minimal` while
+  // still reaching `max`; `ultra` is rejected the same way. The 524,288 output
+  // ceiling is measured, not documented: 524,288 is accepted and 524,289 is not.
+  'minimax-m3.1-flash': { contextWindow: 1_000_000, maxTokens: 524_288, inputModalities: ['text', 'image'], reasoningEfforts: ['minimal','low','medium','high','xhigh','max'] },
 }
 
 export const MIN_CONTEXT_WINDOW = 1_000

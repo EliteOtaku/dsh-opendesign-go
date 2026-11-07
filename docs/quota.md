@@ -11,24 +11,30 @@
 
 ## 套餐结构说明
 
-Go 档月费 $10，官方宣传「每月最高额度 $120」。实际生效的是两个滚动窗口：
+Go 档月费 $10。官方[额度页](https://open-design.ai/model-credits/)给它的两个滚动窗口标了美元价，插件实际读到的是 credit 上限：
 
-| 窗口 | 额度上限 | 折算美元 |
+| 窗口 | 额度上限（`vela` 读数） | 官方页标价 |
 | --- | --- | --- |
-| 5 小时（18,000 秒） | 50,000 credits | $5 |
-| 7 天（604,800 秒） | 150,000 credits | $15 |
+| 5 小时（18,000 秒） | 50,000 credits | $18 |
+| 7 天（604,800 秒） | 150,000 credits | $55 |
 
-换算率是 10,000 credits = $1。这个率由两个窗口独立印证（50,000/5 与 150,000/15 都等于 10,000），也和 `billing summary` 在同一时期返回的 `creditsPerUsd` 一致。
+两侧口径不同，这是本节唯一需要说清的事。页面把 5 小时窗口标成 $18、7 天标成 $55，而 `vela` 报的是 50,000 / 150,000 credits；相除得到 2,727–2,778 credits/美元，与插件采用的 10,000 差约 3.7 倍。
 
-**结论：$120 是宣传口径的上限，月额度按周窗口的费率用不满。**
+**为什么仍然用 10,000。** 三个证据指向它，只有一个指向页面数字：
 
-一个 7 天窗口给 $15，一年 52 周约 4.3 周/月，四周左右合计约 $65，只有宣传值的一半多。这不是插件算错，也不是网关的 bug——$120 是官方宣传值，真正的约束是 5 小时和 7 天这两个窗口。截图里「月总额度 $X / $120」之所以有富余，是因为分母用了宣传值，而实际流速被周窗口卡住。
+- `billing summary` 在 2026-10-19 还答得出来时，直接报过 `creditsPerUsd: 10000`。
+- 拿一串 DeepSeek 调用的 credit 增量除以它们的公开价成本（再乘额度页给的倍率），五次采样落在 **10,067–11,880**：flash 171 credits / $0.0317、60 / $0.0056，eco 101 / $0.0086、33 / $0.0032，glm-5.3-flash 94 / $0.0079。
+- 两个窗口在 10,000 下互相印证（50,000/10,000 = $5，150,000/10,000 = $15），比例 3:1，与页面的 18:55 ≈ 3.06:1 吻合——两套数字的**比例**一致、**绝对值**差一个常数。
 
-因此插件**不做月消耗外推**。从周窗口线性推算月消耗只会报出约一半的宣传额度，看起来像还有大量余量，实际那个余量永远拿不到。插件只回答能操作的问题：照当前速度，这个窗口会不会在重置前用完。
+所以插件采用实测率，页面的美元标价只当参考。页面的 $220/月与 $55/周自洽（4 × 55 = 220），这反过来说明**页面的美元是另一种计价口径**，而不是 `vela` 的 credit 数算错了。
+
+**结论：窗口的 credit 数字是硬约束，「月总额度」是宣传口径。** 插件按 10,000 credits/美元把窗口读数折成美元，所以设置页「月总额度 $X / $220」的百分比会偏低约 3.7 倍——百分比被低估，窗口读数本身准确。
+
+因此插件**不做月消耗外推**。窗口是硬上限，一个月最多就是这四个窗口之和，线性外推到超过它的数字没有意义。插件只回答能操作的问题：照当前速度，这个窗口会不会在重置前用完。
 
 引用代码里的原话（`src/client/usage-format.ts` 中 `daysToExhaust` 的注释）：
 
-> A monthly projection from weekly windows is not just imprecise, it is misleading: Go grants $15 per week and advertises $120 per month, but 4.3 weeks of $15 is $65, so a linear projection reports roughly half the advertised cap and reads as unused headroom that the weekly window will never allow.
+> A monthly projection from the recurrent windows is not just imprecise, it is misleading: the windows are hard caps, so the sum of them over a month is what a subscription can ever spend, and a projection that exceeds it reads as spendable headroom that does not exist.
 
 ## 额度读取
 
@@ -88,7 +94,7 @@ Go 档月费 $10，官方宣传「每月最高额度 $120」。实际生效的�
 
 ### 计价口径
 
-价格来自官方公开价目表的基础档（`src/pricing.ts` 的 `BASE_PRICES`，快照日期 2026-10-19），按每百万 token 计：
+价格来自官方公开价目表的基础档（`src/pricing.ts` 的 `BASE_PRICES`，快照日期 2026-11-07，与线上 41 条一一对应），按每百万 token 计：
 
 ```
 成本 = 输入 token × input + 输出 token × output
@@ -97,7 +103,7 @@ Go 档月费 $10，官方宣传「每月最高额度 $120」。实际生效的�
 
 两条必须说清的局限：
 
-1. **只有基础档**。公开接口不提供阶梯价，超出某模型阶梯阈值的长上下文请求会被低估。所以每份报告都标 `pricedAs: 'base-tier'`，而不是当作账单呈现。
+1. **只有基础档**。线上接口有 9 条带 `longContext` 阶梯（例如 `gpt-6.1-terra` 在 272,000 输入 token 之上价格翻倍），而 `ModelPrice` 没有第二个档位的字段，所以这些模型按基础价记录。超出阶梯阈值的长上下文请求会被低估。因此每份报告都标 `pricedAs: 'base-tier'`，而不是当作账单呈现。
 2. **无价格的模型只计 token、不计金额**，并在报告里单列为 `unpricedCalls`。金额合计因此可能不完整，`unpricedCalls > 0` 时页面会写明。
 
 这两点意味着：**这个金额不是账单，实际扣费以 OpenDesign 控制台为准。**

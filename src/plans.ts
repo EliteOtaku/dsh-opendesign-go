@@ -23,7 +23,15 @@ export interface PlanSpec {
 }
 
 /**
- * Advertised values, read from the official pricing page on 2026-10-20.
+ * Advertised values, read from https://open-design.ai/model-credits/ on
+ * 2026-11-07.
+ *
+ * The cap is the **Design Plan** column, not the "monthly maximum" column: the
+ * former is what a Go subscriber can actually spend on the models this plugin
+ * serves, while the latter also counts plan-model credits that Go does not
+ * include at all and that the other tiers spend on a different model group. The
+ * two columns coincide for Go ($220) and diverge above it ($310 vs $290 for
+ * Plus, $480 vs $360 for Pro, $900 vs $600 for Max).
  *
  * Kept as a frozen literal rather than fetched: these numbers change a few
  * times a year at most, and a page that cannot reach the network still has to
@@ -31,10 +39,10 @@ export interface PlanSpec {
  * cap disagrees.
  */
 export const PLAN_SPECS: Readonly<Record<PlanTier, PlanSpec>> = Object.freeze({
-  go: Object.freeze({ monthlyUsd: 10, monthlyCapUsd: 120 }),
-  plus: Object.freeze({ monthlyUsd: 20, monthlyCapUsd: 180 }),
-  pro: Object.freeze({ monthlyUsd: 100, monthlyCapUsd: 480 }),
-  max: Object.freeze({ monthlyUsd: 200, monthlyCapUsd: 900 }),
+  go: Object.freeze({ monthlyUsd: 10, monthlyCapUsd: 220 }),
+  plus: Object.freeze({ monthlyUsd: 20, monthlyCapUsd: 290 }),
+  pro: Object.freeze({ monthlyUsd: 100, monthlyCapUsd: 360 }),
+  max: Object.freeze({ monthlyUsd: 200, monthlyCapUsd: 600 }),
 })
 
 /** Tier names in pricing order, reused by the parser and by tests. */

@@ -6,7 +6,7 @@
  * merged with the public `model-prices` endpoint, keeping this module as the
  * merge point so callers never depend on where a row came from.
  *
- * The thirteen ids below are the Design Plan models the Go plan grants. Go does
+ * The fourteen ids below are the Design Plan models the Go plan grants. Go does
  * not include the package-model allowance, so nothing else is advertised.
  *
  * @module dsh-opendesign-go/catalog

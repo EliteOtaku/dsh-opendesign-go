@@ -4,7 +4,7 @@
 
 ## 0.1.12
 
-新增 `deepseek-v4.1-flash-eco`。
+新增 `deepseek-v4.1-flash-eco` 与 `minimax-m3.1-flash` 两个模型；把套餐宣传额度换成官方现版；把价目表补齐到线上的 41 条。
 
 ### 一个慢速档
 
@@ -23,6 +23,29 @@ OpenDesign 把 DeepSeek V4.1 Flash 的低速线路单独挂了一个 ID。厂商
 ### 网关的模态元数据是错的
 
 `/v1/models` 给 eco 的 `architecture.input_modalities` 是 `["text"]`，但它实际能读图：红/蓝/绿三张纯色图全部答对，左紫右黄的双色图答「purple 和 yellow」，左侧黑竖条答「A black vertical stripe on the left and a large white area」。这与它把 `metadata.output_budget` 报成 128000 是同一类问题——广播元数据不等于真实能力，因此没有采用，模态依据改为实测记录。
+
+### 补上 MiniMax M3.1 Flash
+
+网关早就在服务 `minimax-m3.1-flash`，插件的静态目录里却没有它，选择器里因此看不到。现在补进三个地方：`MODEL_DEFAULTS`（1M 上下文、524,288 输出、`text` + `image`）、`GO_DESIGN_PLAN_MODELS`（显示名取自定价页的「MiniMax M3.1 Flash」）、`BASE_PRICES`（0.15 / 0.6 / 0.015）。
+
+它的两处参数都不是抄来的：
+
+- **思考等级是新形状**。`none` 三发三中 400，与厂商文档说它「requires adaptive thinking」一致，所以列表从 `minimal` 起步；`ultra` 同样被拒，止于 `max`。这是三组之外的第一种「两端都缺」的集合，说明按系列套模板会错。
+- **524,288 是实测定界**，不是文档值：524,288 返 200，524,289 被拒。
+
+网关还声明 `video` 输入，但宿主的 `ModelModality` 只有 `text | image`，这一项在插件里没有可表达的位置，已在文档里写明而不是悄悄丢掉。
+
+### 套餐额度改用官方现版数字
+
+[额度页](https://open-design.ai/model-credits/)改版后，Go 的宣传口径从 `$120` 变成 `$220`（7 天窗口标价 `$55`），且 `$220 = 4 × $55` 首次自洽。原来的 Plus/Pro/Max 三档（180/480/900）与新表任何一列都对不上，现在统一取 **Design Plan 列**：go 220、plus 290、pro 360、max 600。取这一列而不是「monthly maximum」列的理由是 Go 根本没有套餐模型额度，能花的只有 Design Plan 那一份；两列只在 Go 上重合。
+
+同时查清了一件事：**`vela` 报的 credit 与页面标的美元不是同一套单位**。`vela` 两个窗口仍是 50,000 / 150,000 credits，页面标 `$18` / `$55`，相除得 2,727–2,778 credits/美元；而用 DeepSeek 调用的 credit 增量除以公开价成本，五次采样落在 10,067–11,880。两套数字的**比例**一致（1:3 对 18:55），**绝对值**差约 3.7 倍。汇率常量保持 10,000 不动，注释与 `docs/quota.md` 改成记录这处分歧，而不是假装它不存在。原先「四周只有 $65、用不满 $120」的叙事随之作废——在 $220/$55 下四周恰好等于月额度。
+
+### 价目表补到 41 条
+
+线上 `model-prices` 有 41 条，本地快照只有 35 条时缺了 6 条。逐字段比对后补齐 5 条：`gemini-4-argon`、`gpt-6.1-terra`、`hy4`、`kimi-k3.1-pro`、`minimax-m3.1-flash`；35 条既有价格**零处不符**，所以这不是重抄一遍。`PRICES_AS_OF` 更新为 2026-11-07。
+
+`gpt-6.1-terra` 有 `longContext` 阶梯（272,000 输入 token 之上翻倍），但 `ModelPrice` 没有第二个档位的字段，只能记基础档——这一点现在写进了 `src/pricing.ts` 的模块注释，与 `pricedAs: 'base-tier'` 的既有标注对应上。顺带删掉一句不实的注释：`PRICES_URL` 从来没有被运行时抓取过。
 
 ## 0.1.11
 

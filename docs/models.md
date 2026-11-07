@@ -1,6 +1,6 @@
 # 模型与参数
 
-模型目录是代码内的静态表（`src/catalog.ts` 的 `GO_DESIGN_PLAN_MODELS`），共 13 个，对应 Go 套餐授予的 Design Plan 模型。参数默认值在 `src/model-params.ts` 的 `MODEL_DEFAULTS`。
+模型目录是代码内的静态表（`src/catalog.ts` 的 `GO_DESIGN_PLAN_MODELS`），共 14 个，对应 Go 套餐授予的 Design Plan 模型。参数默认值在 `src/model-params.ts` 的 `MODEL_DEFAULTS`。
 
 目录不来自线上接口：Go 套餐不包含套餐模型额度，可授予的集合是固定的，静态表省掉一次启动期网络依赖。
 
@@ -20,6 +20,7 @@
 | Kimi K2.7 Code | `kimi-k2.7-code` | 262,144 | 262,144 | text, image |
 | MiMo V2.6 Flash | `mimo-v2.6-flash` | 1,000,000 | 128,000 | text, image |
 | MiMo V2.6 Pro | `mimo-v2.6-pro` | 1,000,000 | 128,000 | text, image |
+| MiniMax M3.1 Flash | `minimax-m3.1-flash` | 1,000,000 | 524,288 | text, image |
 | Hunyuan H4 Preview | `hy4-preview` | 1,000,000 | 64,000 | text |
 
 参数的取值依据（代码注释里保留了出处）：
@@ -33,9 +34,10 @@
 - **GPT-6 Luna**：1,050,000 总上下文、128K 输出（922,000 输入 + 128,000 输出 = 1,050,000，三个数字自洽）。实测 1.5M token 的 prompt 未被端点拒绝，说明端点不自校验，这里采用文档值。
 - **Kimi K2.7 Code**：256K 上下文，端点报 `Range of max_tokens should be [1, 262144]`，故输出上限同为 262,144。
 - **MiMo 两个型号**：1M 上下文、128K 输出。
+- **MiniMax M3.1 Flash**：上下文取自厂商文档（[文本生成](https://platform.minimax.io/docs/guides/text-generation)的 Supported Models 表写 1,000,000，网关 `context_limit` 也是 1000000）。**输出上限没有厂商数字**，由实测二分：524,288 返 200，524,289 被拒，故记 524,288。这个 ID 总是思考，`none` 每次都被 400 拒绝，与文档「requires adaptive thinking」一致。
 - **Hunyuan H4 Preview**：1M 上下文、64K 输出。
 
-模态取自厂商文档，逐条注明出处；唯一例外是 `deepseek-v4.1-flash-eco`，厂商没有这个 ID，该行依据实测：
+模态取自厂商文档，逐条注明出处；例外是 `deepseek-v4.1-flash-eco` 与 `minimax-m3.1-flash` 的输出上限，以及前者的模态——厂商没有 eco 这个 ID，该行依据实测：
 
 | 厂商 | 依据 |
 | --- | --- |
@@ -46,6 +48,7 @@
 | 智谱 | [GLM-5.3-Flash/FlashX 页](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)：原生多模态，输入模态为「视频、图像、文本、文件」 |
 | 月之暗面 | [Kimi K2.7 Code 页](https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart)：支持「文本、图片与视频输入」 |
 | 小米 | [MiMo 模型列表](https://mimo.mi.com/docs/zh-CN/quick-start/summary/model)：两个 V2.6 型号均标注「全模态理解」 |
+| MiniMax | [文本生成](https://platform.minimax.io/docs/guides/text-generation)页把 M3.1-Flash 列为多模态模型；实测左紫右黄的 96×96 双色图答「Purple and yellow-green.」。网关另声明 `video` 输入，但宿主的模态类型只有 `text` 与 `image`，这一项无法表达 |
 | 腾讯 | 混元把视觉能力放在独立的 `hunyuan-vision` 系列，H4 不在其中；网关对 H4 也返回 404 `No endpoints found that support image input` |
 
 「图片输入」一列取自 `src/model-params.ts` 的 `MODEL_DEFAULTS`。
@@ -100,9 +103,15 @@
 | --- | --- |
 | deepseek-v4.1-flash、deepseek-v4-flash、deepseek-v4-flash-vision-exp、deepseek-v4-pro、gpt-6-luna | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`ultra`、`max` |
 | claude-haiku-5.5、kimi-k2.7-code、mimo-v2.6-flash、mimo-v2.6-pro、hy4-preview、deepseek-v4.1-flash-eco | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`（跳过 `ultra`） |
+| minimax-m3.1-flash | `minimal`、`low`、`medium`、`high`、`xhigh`、`max`（**没有 `none`**，也没有 `ultra`） |
 | glm-5.3-flash、glm-5.3-flashx | 仅 `low`、`high`、`max` |
 
-选到该模型不支持的值，网关会返回 400。因此插件按模型过滤列表，并把默认等级钳制在合法范围内。`deepseek-v4.1-flash-eco` 的等级集合与上表中间那行五个模型**完全相同**，但它之所以单独记一次，是因为它是 **DeepSeek 系列里唯一没有 `ultra` 的一档**：五轮交替实测中它对 `ultra` 每次都在一秒内返回 400（`[code=upstream_error]`），同一时刻 `deepseek-v4.1-flash` 五轮全部 200。同一个模型的快慢两档在思考等级上出现差异，这件事本身是参数表必须按模型存、不能按系列推断的理由。
+选到该模型不支持的值，网关会返回 400。因此插件按模型过滤列表，并把默认等级钳制在合法范围内。
+
+两行值得单独说明，因为它们各自否证了一种「按系列推」的省事做法：
+
+- `deepseek-v4.1-flash-eco` 的集合与中间那行五个模型**完全相同**，但它是 **DeepSeek 系列里唯一没有 `ultra` 的一档**：五轮交替实测它对 `ultra` 每次都在一秒内返回 400（`[code=upstream_error]`），同一时刻 `deepseek-v4.1-flash` 五轮全部 200。同一个模型的快慢两档在思考等级上出现差异，这件事本身就是参数表必须按模型存、不能按系列推断的理由。
+- `minimax-m3.1-flash` 是唯一**两端都被削掉**的：`none` 三次全部 400，与厂商文档说它「requires adaptive thinking」吻合，所以它的列表从 `minimal` 起步；`ultra` 同样被拒，于是止于 `max`。它是三组之外的新形状，不能并入任何一行。
 
 未知模型 ID（不在静态表里的）同样会拿到思考等级列表，因为网关对它服务的每个模型都接受这个参数；隐藏选择器反而会让比本版本更新的 ID 少一个能力。
 

@@ -166,10 +166,20 @@ function windowOf(raw: NonNullable<NonNullable<FundingCheck['codingPlan']>['wind
 /**
  * Credits per US dollar, as the Go plan publishes them.
  *
- * Observed from `billing summary` while it answered (2026-10-19), and implied
- * independently by both quota windows: 50000 credits / $5 and 150000 / $15 are
- * both 10000. Kept as a documented constant because the command now returns 403
- * and no other one exposes the rate.
+ * Two sources disagree, and the measured one wins. The public page
+ * (https://open-design.ai/model-credits/, read 2026-11-07) prices the two Go
+ * windows at $18 for 5 hours and $55 for 7 days, which against `vela`'s own
+ * ceilings of 50,000 and 150,000 credits would imply 2,727–2,778 credits per
+ * dollar. Metered calls says otherwise: dividing the credit delta of a run of
+ * DeepSeek calls by their list-price cost and the published model multiplier
+ * lands at 10,067–11,880 across five samples, and the local ledger's own 7-day
+ * total reconciles to the same order of magnitude. The page's dollar figures are
+ * therefore advisory, not the unit `vela` counts in.
+ *
+ * 10,000 was also what `billing summary` reported directly while it still
+ * answered (2026-10-19), and it is what makes both windows agree with each
+ * other. The command now returns 403 / 503 and nothing else exposes the rate,
+ * so this stays a documented constant rather than a live read.
  */
 export const FALLBACK_CREDITS_PER_USD = 10_000
 

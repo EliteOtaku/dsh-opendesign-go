@@ -8,7 +8,7 @@ const healthy: RouteDiagnostics = {
   enabled: true,
   credentialResolved: true,
   triedRef: 'OPENDESIGN_API_KEY',
-  modelCount: 13,
+  modelCount: 14,
   asOf: '2026-10-20T00:00:00.000Z',
 }
 

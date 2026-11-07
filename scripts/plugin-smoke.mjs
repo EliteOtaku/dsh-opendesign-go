@@ -25,10 +25,14 @@ function assert(condition, message) {
 assert(plugin.name === 'llm-opendesign-go', `unexpected module name: ${String(plugin.name)}`)
 assert(typeof plugin.apply === 'function', 'apply is not exported as a function')
 assert(Array.isArray(plugin.GO_DESIGN_PLAN_MODELS), 'the Go model seed is not exported')
-assert(plugin.GO_DESIGN_PLAN_MODELS.length === 13, `expected 13 Design Plan models, saw ${plugin.GO_DESIGN_PLAN_MODELS.length}`)
+assert(plugin.GO_DESIGN_PLAN_MODELS.length === 14, `expected 14 Design Plan models, saw ${plugin.GO_DESIGN_PLAN_MODELS.length}`)
 assert(
   plugin.GO_DESIGN_PLAN_MODELS.some((model) => model.id === 'deepseek-v4.1-flash-eco'),
   'the slow-tier DeepSeek id is missing from the built seed',
+)
+assert(
+  plugin.GO_DESIGN_PLAN_MODELS.some((model) => model.id === 'minimax-m3.1-flash'),
+  'MiniMax M3.1 Flash is missing from the built seed',
 )
 
 // 1) The real Cordis runtime must accept the module. This is the check that

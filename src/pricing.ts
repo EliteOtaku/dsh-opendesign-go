@@ -2,13 +2,17 @@
  * Public OpenDesign price list, embedded as a snapshot.
  *
  * `GET https://amr-api.open-design.ai/api/v1/public/model-prices` is public and
- * needs no credential, so the host refreshes it at runtime; this snapshot is the
- * fallback for a cold or offline start, and the values the page uses before the
- * first refresh lands.
+ * needs no credential. Nothing fetches it at run time: `PRICES_URL` is recorded
+ * so a reader can re-derive this table, and every value below was copied from
+ * that endpoint. Filling the gap would mean another network call on the request
+ * path, for a list that changes a few times a month at most.
  *
- * Only the **base tier** is published. A request past a model's tier threshold
- * costs more than this table says, which is why every report is labelled
- * `base-tier` rather than presented as a bill.
+ * Only the **base tier** is represented. Nine rows on the endpoint carry a
+ * `longContext` block that raises the price above an input-token threshold (for
+ * example `gpt-6.1-terra` above 272,000 input tokens); `ModelPrice` has no field
+ * for a second tier, so those models are recorded at their base price and every
+ * report that involves them is labelled `base-tier` rather than presented as a
+ * bill.
  *
  * @module dsh-opendesign-go/pricing
  */
@@ -39,6 +43,7 @@ export const BASE_PRICES: readonly ModelPrice[] = [
   { model: 'deepseek-v4-pro', input: 1.32, output: 3.96, cacheRead: 0.044 },
   { model: 'gemini-3.7-flash', input: 0.75, output: 3.75, cacheRead: 0.075 },
   { model: 'gemini-3.8-flash', input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.08333 },
+  { model: 'gemini-4-argon', input: 2, output: 10, cacheRead: 0.1 },
   { model: 'glm-5.2', input: 1.4, output: 4.4, cacheRead: 0.26 },
   { model: 'glm-5.3-flash', input: 0.075, output: 0.25, cacheRead: 0.015 },
   { model: 'glm-5.3-flashx', input: 0.37, output: 1.25, cacheRead: 0.075 },
@@ -46,17 +51,23 @@ export const BASE_PRICES: readonly ModelPrice[] = [
   { model: 'gpt-5.6-sol', input: 4, output: 20, cacheRead: 0.4, cacheWrite: 5 },
   { model: 'gpt-5.6-terra', input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 },
   { model: 'gpt-6.1-sol', input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+  // Above 272,000 input tokens the endpoint prices this row higher (2 / 7.5 /
+  // 0.1 / 2.5). Recorded at the base tier: see the module note.
+  { model: 'gpt-6.1-terra', input: 1, output: 5, cacheRead: 0.05, cacheWrite: 1.25 },
   { model: 'gpt-6-astra', input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   { model: 'gpt-6-luna', input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   { model: 'gpt-6-sol', input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   { model: 'grok-4.5', input: 2, output: 6, cacheRead: 0.5 },
   { model: 'grok-4.6', input: 2, output: 6, cacheRead: 0.5 },
   { model: 'grok-4.7', input: 2, output: 6, cacheRead: 0.5 },
+  { model: 'hy4', input: 0.417, output: 1.2505, cacheRead: 0.021 },
   { model: 'hy4-preview', input: 0.834, output: 2.501, cacheRead: 0.042 },
   { model: 'kimi-k2.7-code', input: 0.95, output: 4, cacheRead: 0.19 },
   { model: 'kimi-k3', input: 3, output: 15, cacheRead: 0.3 },
+  { model: 'kimi-k3.1-pro', input: 2, output: 10, cacheRead: 0.2 },
   { model: 'mimo-v2.6-flash', input: 0.14, output: 0.28, cacheRead: 0.0028 },
   { model: 'mimo-v2.6-pro', input: 0.435, output: 0.87, cacheRead: 0.0036 },
+  { model: 'minimax-m3.1-flash', input: 0.15, output: 0.6, cacheRead: 0.015 },
   { model: 'muse-spark-1.3', input: 1.25, output: 4.25, cacheRead: 0.15 },
   { model: 'muse-wonder', input: 4, output: 20, cacheRead: 0.2 },
   { model: 'qwen3.7-max', input: 2.5, output: 7.5, cacheRead: 0.5, cacheWrite: 3.125 },

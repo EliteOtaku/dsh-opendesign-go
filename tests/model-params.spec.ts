@@ -17,7 +17,7 @@ describe('gateway model defaults', () => {
   it('covers every model the Go plan grants', () => {
     // A model without defaults loses its context display and output cap, which
     // silently truncates conversations instead of failing visibly.
-    expect(Object.keys(MODEL_DEFAULTS)).toHaveLength(13)
+    expect(Object.keys(MODEL_DEFAULTS)).toHaveLength(14)
   })
 
   it('uses the vendor-published DeepSeek limits, not the gateway metadata', () => {
@@ -52,6 +52,8 @@ describe('gateway model defaults', () => {
     expect(MODEL_DEFAULTS['gpt-6-luna']?.maxTokens).toBe(128_000)
     expect(MODEL_DEFAULTS['hy4-preview']?.maxTokens).toBe(64_000)
     expect(MODEL_DEFAULTS['kimi-k2.7-code']?.maxTokens).toBe(262_144)
+    // Minimax's ceiling is measured: 524,288 is accepted, 524,289 is refused.
+    expect(MODEL_DEFAULTS['minimax-m3.1-flash']?.maxTokens).toBe(524_288)
   })
 
   it('uses the exact 256K context Kimi reports, not a rounded value', () => {
@@ -92,6 +94,10 @@ describe('gateway model defaults', () => {
       // mimo.mi.com model list marks both V2.6 models as 全模态理解.
       'mimo-v2.6-flash',
       'mimo-v2.6-pro',
+      // MiniMax ships this id as a multimodal model; a purple/yellow split PNG
+      // came back "Purple and yellow-green." The gateway also advertises video
+      // input, which this table cannot express: `ModelModality` is text | image.
+      'minimax-m3.1-flash',
     ]
     const textOnly = [
       // Same DeepSeek pricing table: 图像理解 不支持 for V4-Pro.
@@ -222,6 +228,16 @@ describe('reasoning efforts', () => {
     // Kimi stops one step below the DeepSeek family.
     expect(MODEL_DEFAULTS['kimi-k2.7-code']?.reasoningEfforts).not.toContain('ultra')
     expect(MODEL_DEFAULTS['kimi-k2.7-code']?.reasoningEfforts).toContain('xhigh')
+
+    // MiniMax is the only model whose list starts at `minimal`: the id always
+    // thinks, and `none` came back 400 three times out of three, which matches
+    // the vendor note that it "requires adaptive thinking". `ultra` is refused
+    // too, so this is the one set that drops both ends of the union.
+    const minimax = MODEL_DEFAULTS['minimax-m3.1-flash']?.reasoningEfforts
+    expect(minimax).not.toContain('none')
+    expect(minimax).not.toContain('ultra')
+    expect(minimax?.[0]).toBe('minimal')
+    expect(minimax?.at(-1)).toBe('max')
   })
 
   it('gives every model a non-empty effort list', () => {

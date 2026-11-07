@@ -20,7 +20,15 @@ export interface PlanSpec {
     readonly monthlyCapUsd: number;
 }
 /**
- * Advertised values, read from the official pricing page on 2026-10-20.
+ * Advertised values, read from https://open-design.ai/model-credits/ on
+ * 2026-11-07.
+ *
+ * The cap is the **Design Plan** column, not the "monthly maximum" column: the
+ * former is what a Go subscriber can actually spend on the models this plugin
+ * serves, while the latter also counts plan-model credits that Go does not
+ * include at all and that the other tiers spend on a different model group. The
+ * two columns coincide for Go ($220) and diverge above it ($310 vs $290 for
+ * Plus, $480 vs $360 for Pro, $900 vs $600 for Max).
  *
  * Kept as a frozen literal rather than fetched: these numbers change a few
  * times a year at most, and a page that cannot reach the network still has to

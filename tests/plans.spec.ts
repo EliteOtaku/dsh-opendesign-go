@@ -9,12 +9,14 @@ import type { PlanTier } from '../src/plans.ts'
 
 describe('PLAN_SPECS', () => {
   it('carries the four published tiers at their advertised values', () => {
-    // Read from the official pricing page on 2026-10-20; a change here means
-    // the page moved, so the failure should name the tier.
-    expect(PLAN_SPECS.go).toEqual({ monthlyUsd: 10, monthlyCapUsd: 120 })
-    expect(PLAN_SPECS.plus).toEqual({ monthlyUsd: 20, monthlyCapUsd: 180 })
-    expect(PLAN_SPECS.pro).toEqual({ monthlyUsd: 100, monthlyCapUsd: 480 })
-    expect(PLAN_SPECS.max).toEqual({ monthlyUsd: 200, monthlyCapUsd: 900 })
+    // Read from https://open-design.ai/model-credits/ on 2026-11-07; a change
+    // here means the page moved, so the failure should name the tier. The cap is
+    // the page's Design Plan column — Go spends nothing outside it, and the
+    // "monthly maximum" column also counts plan-model credits Go does not get.
+    expect(PLAN_SPECS.go).toEqual({ monthlyUsd: 10, monthlyCapUsd: 220 })
+    expect(PLAN_SPECS.plus).toEqual({ monthlyUsd: 20, monthlyCapUsd: 290 })
+    expect(PLAN_SPECS.pro).toEqual({ monthlyUsd: 100, monthlyCapUsd: 360 })
+    expect(PLAN_SPECS.max).toEqual({ monthlyUsd: 200, monthlyCapUsd: 600 })
   })
 
   it('publishes exactly those tiers', () => {
@@ -70,8 +72,8 @@ describe('parsePlanOverrides', () => {
 
 describe('planOf', () => {
   it('returns the built-in spec when nothing is overridden', () => {
-    expect(planOf('go', {})).toEqual({ monthlyUsd: 10, monthlyCapUsd: 120 })
-    expect(planOf('max', {})).toEqual({ monthlyUsd: 200, monthlyCapUsd: 900 })
+    expect(planOf('go', {})).toEqual({ monthlyUsd: 10, monthlyCapUsd: 220 })
+    expect(planOf('max', {})).toEqual({ monthlyUsd: 200, monthlyCapUsd: 600 })
   })
 
   it('applies an override to the cap only', () => {
@@ -99,14 +101,14 @@ describe('planOf', () => {
     // Callers can build the map without the parser, so a bad number must not
     // reach the UI as `$NaN`.
     const broken = { go: Number.NaN, plus: 0 } as Partial<Record<PlanTier, number>>
-    expect(planOf('go', broken)).toEqual({ monthlyUsd: 10, monthlyCapUsd: 120 })
-    expect(planOf('plus', broken)).toEqual({ monthlyUsd: 20, monthlyCapUsd: 180 })
+    expect(planOf('go', broken)).toEqual({ monthlyUsd: 10, monthlyCapUsd: 220 })
+    expect(planOf('plus', broken)).toEqual({ monthlyUsd: 20, monthlyCapUsd: 290 })
   })
 
   it('does not mutate the built-in table', () => {
     const spec = planOf('go', parsePlanOverrides('go:999'))
     expect(spec?.monthlyCapUsd).toBe(999)
-    expect(PLAN_SPECS.go.monthlyCapUsd).toBe(120)
+    expect(PLAN_SPECS.go.monthlyCapUsd).toBe(220)
   })
 })
 

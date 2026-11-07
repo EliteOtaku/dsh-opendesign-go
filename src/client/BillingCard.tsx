@@ -110,9 +110,9 @@ export function BillingCard({ snapshot, plan, measuredUsd, baseline, onAlign, ed
   // Only the widest window is priced: summing windows would charge the same
   // tokens twice, since the short window's usage is contained in the long one.
   const monthlySpent = monthly === undefined ? undefined : spentFromCredits(monthly.usedCredits, snapshot.creditsPerUsd)
-  // Linear projection from the widest window onto a 30-day month. Carries its own
-  // caveat because the scales differ: the weekly allowance caps what a month can
-  // reach, so a low projection is not headroom.
+  // Linear projection from the widest window onto a 30-day month. Kept with its
+  // caveat: four of these windows make the month, so a projection below the
+  // advertised cap is a rate statement, not headroom.
   const projected = ((): number | undefined => {
     if (monthlySpent === undefined || monthly === undefined) return undefined
     const start = Date.parse(monthly.resetsAt) - monthly.durationSeconds * 1000
@@ -145,8 +145,8 @@ export function BillingCard({ snapshot, plan, measuredUsd, baseline, onAlign, ed
               </span>
             )}
             <span className={styles.note}>
-              月总额度是官方宣传值，实际约束是上方窗口：Go 每周 $15，四周合计约 $60，
-              因此 $120 的月额度按周口径用不满
+              月总额度取官方页的宣传值；窗口读数按 10,000 credits/美元折算，
+              两者相差约 3.7 倍，口径以窗口为准（见 docs/quota.md）
             </span>
           </>
         )}

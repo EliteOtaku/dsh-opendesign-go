@@ -100,10 +100,12 @@ export function barColor(remaining: number): string {
  *
  * Answers the question a user actually acts on — "will I hit the wall before it
  * resets?" — rather than "what would a month cost". A monthly projection from
- * weekly windows is not just imprecise, it is misleading: Go grants $15 per week
- * and advertises $120 per month, but 4.3 weeks of $15 is $65, so a linear
- * projection reports roughly half the advertised cap and reads as unused
- * headroom that the weekly window will never allow.
+ * the recurrent windows is not just imprecise, it is misleading: the windows are
+ * hard caps, so the sum of them over a month is what a subscription can ever
+ * spend, and a projection that exceeds it reads as spendable headroom that does
+ * not exist. Go now publishes $220 a month and $55 a week, which agree exactly
+ * at four weeks; the same four-to-one relation held under the earlier $120/$15
+ * pair, so the shape of the warning survives any repricing.
  *
  * Returns undefined while nothing has been consumed: no rate exists yet, and
  * reporting "0 days" would look like immediate exhaustion.

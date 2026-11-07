@@ -23,7 +23,7 @@ function entry(overrides: Partial<LedgerEntry> = {}): LedgerEntry {
 
 describe('price list', () => {
   it('carries the models the gateway actually serves', () => {
-    expect(BASE_PRICES.length).toBe(36)
+    expect(BASE_PRICES.length).toBe(41)
     const flash = priceOf('deepseek-v4.1-flash')
     expect(flash?.input).toBe(0.3)
     expect(flash?.output).toBe(1.2)
@@ -32,6 +32,17 @@ describe('price list', () => {
     expect(eco?.input).toBe(flash?.input)
     expect(eco?.output).toBe(flash?.output)
     expect(eco?.cacheRead).toBe(flash?.cacheRead)
+    // The rows added with the 2026-11-07 refresh, pinned so a bad copy fails
+    // here instead of quietly mispricing a month of usage.
+    expect(priceOf('minimax-m3.1-flash')).toEqual({
+      model: 'minimax-m3.1-flash', input: 0.15, output: 0.6, cacheRead: 0.015,
+    })
+    expect(priceOf('gemini-4-argon')?.input).toBe(2)
+    expect(priceOf('kimi-k3.1-pro')?.output).toBe(10)
+    expect(priceOf('hy4')?.input).toBe(0.417)
+    // Recorded at its base tier; the endpoint doubles it above 272,000 input
+    // tokens, which `ModelPrice` cannot express.
+    expect(priceOf('gpt-6.1-terra')?.input).toBe(1)
   })
 
   it('returns undefined for an unknown model instead of guessing a price', () => {
