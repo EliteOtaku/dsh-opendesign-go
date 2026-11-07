@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OpenDesignAdapter, isRetryableAccountFailure } from '../src/adapter.ts'
 import type { OpenDesignConfig } from '../src/config-contract.ts'
-import { DEFAULT_BASE_URL } from '../src/config-contract.ts'
+import { DEFAULT_BASE_URL, DEFAULT_PROTOCOL } from '../src/config-contract.ts'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 
 /** Minimal config with the two accounts this suite exercises. */
@@ -16,6 +16,7 @@ const CONFIG: OpenDesignConfig = {
   sessionRef: '',
   workspaceId: '',
   baseURL: DEFAULT_BASE_URL,
+  protocol: DEFAULT_PROTOCOL,
   requestTimeoutMs: 1_800_000,
   streamIdleTimeoutMs: 300_000,
 }

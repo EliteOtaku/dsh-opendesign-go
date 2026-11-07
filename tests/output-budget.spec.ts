@@ -82,6 +82,19 @@ describe('output budget', () => {
     expect(estimated).toBeLessThan(1_200)
   })
 
+  it('charges a Responses image part the same flat rate', () => {
+    // The two surfaces spell the part differently — `{image_url:{url}}` versus a
+    // bare data URL — and only the `type` is common. Reading just the Chat
+    // spelling would bill a 2M-character base64 payload as text on this surface.
+    const huge = `data:image/jpeg;base64,${'A'.repeat(2_000_000)}`
+    const estimated = estimatePromptTokens(
+      [{ role: 'user', content: [{ type: 'input_image', image_url: huge }] }],
+      undefined,
+    )
+
+    expect(estimated).toBeLessThan(1_200)
+  })
+
   it('counts tool declarations, because they ride in the same input budget', () => {
     const message = [{ role: 'user', content: 'hi' }]
     const withoutTools = estimatePromptTokens(message, undefined)

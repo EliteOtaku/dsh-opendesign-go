@@ -19,7 +19,7 @@ export const DISPLAY_NAME = 'OpenDesign Go'
  * a single file with no reliable path back to its own package, and the update
  * check needs a value it can compare without filesystem access.
  */
-export const PLUGIN_VERSION = '0.1.13'
+export const PLUGIN_VERSION = '0.1.14'
 
 /** Settings namespace this plugin installs and the Web page edits. */
 export const SETTINGS_NAMESPACE = 'llm-opendesign-go'
@@ -38,6 +38,30 @@ export const DEFAULT_BASE_URL = 'https://amr-link.open-design.ai/v1'
 
 /** Environment variable resolving the OpenDesign API key by default. */
 export const DEFAULT_API_KEY_ENV = 'OPENDESIGN_API_KEY'
+
+/**
+ * Inference surfaces this route can speak.
+ *
+ * Both are served by the same host; only the path and the wire shape differ.
+ * Values are persisted, so they are stable strings rather than an ordinal.
+ */
+export type ProtocolId = 'chat' | 'responses'
+
+/** Every {@link ProtocolId}, in the order the settings page offers them. */
+export const PROTOCOL_IDS = ['chat', 'responses'] as const
+
+/**
+ * Surface used until the user picks another.
+ *
+ * See {@link OpenDesignConfig.protocol} for why chat wins the default.
+ */
+export const DEFAULT_PROTOCOL: ProtocolId = 'chat'
+
+/** Human-readable name of one protocol, for the settings page. */
+export const PROTOCOL_LABELS: Readonly<Record<ProtocolId, string>> = {
+  chat: 'Chat Completions',
+  responses: 'Responses',
+}
 
 /**
  * Credential reference holding the **console session token**, used only to read
@@ -184,6 +208,17 @@ export interface OpenDesignConfig {
   readonly enabledModels?: readonly string[]
   /** Parsed override table, filled by `readConfig`. */
   readonly modelParams?: Readonly<Record<string, { contextWindow?: number, maxTokens?: number }>>
+  /**
+   * Which OpenAI-compatible surface this route speaks.
+   *
+   * `chat` is `POST {baseURL}/chat/completions`; `responses` is
+   * `POST {baseURL}/responses`. Chat stays the default because it is the one
+   * surface that returns the model's own reasoning, which the composer renders:
+   * Responses reports thinking only as a rewritten summary, so switching is a
+   * downgrade in reasoning fidelity that must be a deliberate choice rather than
+   * something an update performs on the user's behalf.
+   */
+  readonly protocol: ProtocolId
   /** Inference base URL without a trailing slash. */
   readonly baseURL: string
   /** Deadline for one dispatch, spanning discovery through streaming. */

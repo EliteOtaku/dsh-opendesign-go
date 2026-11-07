@@ -14,8 +14,20 @@
  * @module dsh-opendesign-go/update-check
  */
 
+/** Package name, as the registry, GitHub and the profile all spell it. */
+export const PACKAGE_NAME = 'dsh-opendesign-go'
+
 /** Registry document this plugin reads its own latest version from. */
-export const REGISTRY_LATEST_URL = 'https://registry.npmjs.org/dsh-opendesign-go/latest'
+export const REGISTRY_LATEST_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`
+
+/**
+ * Tags of this plugin's own repository.
+ *
+ * Tags rather than `releases/latest`: the repository publishes a tag per
+ * release and no GitHub Release, so the releases endpoint answers 404 while the
+ * tags endpoint carries the whole history.
+ */
+export const GITHUB_TAGS_URL = `https://api.github.com/repos/EliteOtaku/${PACKAGE_NAME}/tags?per_page=30`
 
 /** One release found on the registry. */
 export interface LatestRelease {
@@ -102,6 +114,60 @@ export async function fetchLatestRelease(
 }
 
 /**
+ * Read the newest tag out of the repository's tag list.
+ *
+ * The list is ordered newest-first by GitHub, but the order is not part of the
+ * contract, so the maximum is taken rather than the first entry. Tags that are
+ * not a dotted version are skipped: the repository also tags documents.
+ * @param body - parsed JSON from the tags endpoint.
+ * @returns the version without its leading `v`, or undefined when none is usable.
+ */
+export function parseLatestTag(body: unknown): string | undefined {
+  if (!Array.isArray(body)) return undefined
+  let best: string | undefined
+  for (const entry of body) {
+    if (entry === null || typeof entry !== 'object') continue
+    const name = (entry as Record<string, unknown>).name
+    if (typeof name !== 'string') continue
+    const version = name.replace(/^v/u, '')
+    if (!/^\d+(?:\.\d+)*$/u.test(version)) continue
+    if (best === undefined || compareVersions(version, best) > 0) best = version
+  }
+  return best
+}
+
+/**
+ * Ask the repository for its newest tag.
+ *
+ * Never throws, for the same reason as {@link fetchLatestRelease}: this is a
+ * background courtesy, and an unreachable host says nothing about the plugin.
+ * @param fetchImpl - fetch implementation, injected for tests.
+ * @param timeoutMs - request deadline.
+ * @returns the version, or undefined when it could not be read.
+ */
+export async function fetchLatestTag(
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 5_000,
+): Promise<string | undefined> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => { controller.abort() }, timeoutMs)
+  try {
+    const response = await fetchImpl(GITHUB_TAGS_URL, {
+      // GitHub rejects a request without a User-Agent, and this call carries no
+      // credential, so the header is the whole access control.
+      headers: { accept: 'application/vnd.github+json', 'user-agent': PACKAGE_NAME },
+      signal: controller.signal,
+    })
+    if (!response.ok) return undefined
+    return parseLatestTag(await response.json())
+  } catch {
+    return undefined
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * Decide whether a discovered version is an upgrade worth reporting.
  * @param current - this build's version.
  * @param latest - version found on the registry, if any.
@@ -116,8 +182,10 @@ export function pendingUpdate(current: string, latest: LatestRelease | undefined
 export interface UpdateNotice {
   /** Version this build reports. */
   readonly current: string
-  /** Version the registry reports as newest. */
-  readonly latest: string
+  /** Newest version the npm registry publishes, when it is newer than this build. */
+  readonly latest: string | undefined
+  /** Newest version tagged in the repository, when it is newer than this build. */
+  readonly githubLatest: string | undefined
   /** Project page, when the registry carried one. */
   readonly homepage: string | undefined
 }
@@ -128,6 +196,11 @@ export interface UpdateNotice {
  * A malformed value reads as "no notice" rather than throwing: the field is
  * written by a background check, and one bad character must not take the whole
  * settings page down.
+ *
+ * A notice is kept when **either** source is ahead: the two surfaces can
+ * disagree — a tag is pushed before the registry answers, and a registry
+ * publish can exist without a tag — and suppressing the card because the other
+ * source is current would hide the one route that does have something to offer.
  * @param raw - serialized notice, or undefined/empty when unset.
  * @returns the notice, or undefined when there is nothing to show.
  */
@@ -142,11 +215,15 @@ export function parseUpdate(raw: string | undefined): UpdateNotice | undefined {
   if (parsed === null || typeof parsed !== 'object') return undefined
   const row = parsed as Record<string, unknown>
   const current = row.current
-  const latest = row.latest
   if (typeof current !== 'string' || current.length === 0) return undefined
-  if (typeof latest !== 'string' || latest.length === 0) return undefined
-  // Guard against a stale field that would render "new version 0.1.0（当前 0.1.2）".
-  if (compareVersions(latest, current) <= 0) return undefined
+  /** Keep a version only when it is actually ahead of this build. */
+  const ahead = (value: unknown): string | undefined =>
+    // A stale field that still names this build (or an older one) would render
+    // "新版本 0.1.0（当前 0.1.2）", which reads as a downgrade.
+    (typeof value === 'string' && value.length > 0 && compareVersions(value, current) > 0 ? value : undefined)
+  const latest = ahead(row.latest)
+  const githubLatest = ahead(row.githubLatest)
+  if (latest === undefined && githubLatest === undefined) return undefined
   const homepage = typeof row.homepage === 'string' ? row.homepage : undefined
-  return { current, latest, homepage }
+  return { current, latest, githubLatest, homepage }
 }

@@ -12,8 +12,8 @@
  * @module dsh-opendesign-go/config
  */
 import z from '@deepseek-ai/schemastery'
-import { DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL } from './config-contract.ts'
-import type { OpenDesignAccount, OpenDesignConfig } from './config-contract.ts'
+import { DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL, DEFAULT_PROTOCOL, PROTOCOL_IDS } from './config-contract.ts'
+import type { OpenDesignAccount, OpenDesignConfig, ProtocolId } from './config-contract.ts'
 import { parseEnabledModels, parseModelParams } from './model-params.ts'
 
 /** Deadline for one dispatch, spanning discovery through streaming. */
@@ -52,6 +52,17 @@ const AccountSchema = z.object({
 const AccountsSchema = z.array(AccountSchema).default([]) as unknown as z<readonly OpenDesignAccount[]>
 
 /**
+ * The inference surface, as a closed set of two strings.
+ *
+ * A `union` of `const` leaves rather than a plain `string`: the settings page
+ * renders it as a choice, and an unknown value is refused at load time instead
+ * of reaching `dispatch` and failing as a 404 on a path that does not exist.
+ * A union is a leaf node, so it survives the `volatile()` projection the way
+ * any scalar does.
+ */
+const ProtocolSchema = z.union(PROTOCOL_IDS).default(DEFAULT_PROTOCOL) as unknown as z<ProtocolId>
+
+/**
  * Normalize the configured account list.
  * @param accounts - the stored list, possibly empty.
  * @returns the list, or `null` when it carries no account.
@@ -81,6 +92,7 @@ export const PlainConfig: z<OpenDesignConfig> = z.object({
   recoveredProviders: z.string().default(''),
   refreshNonce: z.string().default(''),
   updateJson: z.string().default(''),
+  protocol: ProtocolSchema,
   baseURL: z.string().default(DEFAULT_BASE_URL),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -119,6 +131,7 @@ export const Config = z.object({
   recoveredProviders: z.string().default('').volatile(),
   refreshNonce: z.string().default('').volatile(),
   updateJson: z.string().default('').volatile(),
+  protocol: ProtocolSchema.volatile(),
   baseURL: z.string().default(DEFAULT_BASE_URL).volatile(),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS).volatile(),
   streamIdleTimeoutMs: z.number().default(DEFAULT_STREAM_IDLE_TIMEOUT_MS).volatile(),
@@ -170,6 +183,8 @@ export interface LiveConfig {
   readonly refreshNonce: { get(): string }
   /** Newest published version, when newer than this build. */
   readonly updateJson: { get(): string }
+  /** Inference surface: `chat` or `responses`. */
+  readonly protocol: { get(): ProtocolId }
   /** Inference base URL, stored as configured. */
   readonly baseURL: { get(): string }
   /** Deadline for one dispatch. */
@@ -206,6 +221,7 @@ export function readConfig(config: LiveConfig): OpenDesignConfig {
     updateJson: config.updateJson.get(),
     enabledModels: parseEnabledModels(config.enabledModelsJson.get()),
     modelParams: parseModelParams(config.modelParamsJson.get()),
+    protocol: config.protocol.get(),
     baseURL: migrateGatewayBaseURL(config.baseURL.get()),
     requestTimeoutMs: config.requestTimeoutMs.get(),
     streamIdleTimeoutMs: config.streamIdleTimeoutMs.get(),

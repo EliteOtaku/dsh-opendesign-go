@@ -21,6 +21,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { DISPLAY_NAME, PROFILE_ENTRY_ID } from '../config-contract.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
 import { accountCommands } from './accounts-controller.ts'
+import { updateCommands } from './update-controller.ts'
 import { OpenDesignSection } from './Section.tsx'
 import type { OpenDesignSectionInjected } from './Section.tsx'
 import { ComposerUsagePill } from './UsagePill.tsx'
@@ -56,6 +57,10 @@ export function apply(ctx: ClientContext): void {
   // Account mutations reach the host through one mounted Remote namespace; the
   // page never touches a credential itself.
   const commands = accountCommands(ctx)
+  // Updates use a second namespace (`remote.pluginManager`), which the Host
+  // publishes for its own plugin manager. It is injected on its own so a Host
+  // without it loses the update buttons, not the page.
+  const updates = updateCommands(ctx)
   // The settings transport is mounted by the shell's settings plugin, whose
   // activation order relative to this one is not constrained. Reading
   // `configForms` eagerly can bind the form to a fiber that never receives the
@@ -67,6 +72,9 @@ export function apply(ctx: ClientContext): void {
       form,
       execute: commands.execute,
       channelState: commands.state,
+      updateFromNpm: updates.updateFromNpm,
+      installFromGithub: updates.installFromGithub,
+      updateState: updates.state,
     })
     ready.effect(() => ready.slots.inject('settings.section', () => ready.slots.register({
       name: 'settings.section',

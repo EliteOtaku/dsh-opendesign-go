@@ -11,7 +11,7 @@ import {
   readConfig,
 } from '../src/config.ts'
 import type { LiveConfig } from '../src/config.ts'
-import { DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL } from '../src/config-contract.ts'
+import { DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL, DEFAULT_PROTOCOL } from '../src/config-contract.ts'
 import type { OpenDesignConfig } from '../src/config-contract.ts'
 
 /** The same shape with mutable fields, so a test can simulate a committed edit. */
@@ -40,6 +40,7 @@ function liveConfigOf(values: OpenDesignConfig): LiveConfig {
     refreshNonce: { get: () => values.refreshNonce },
     updateJson: { get: () => values.updateJson },
     baseURL: { get: () => values.baseURL },
+    protocol: { get: () => values.protocol },
     requestTimeoutMs: { get: () => values.requestTimeoutMs },
     streamIdleTimeoutMs: { get: () => values.streamIdleTimeoutMs },
   }
@@ -68,6 +69,7 @@ const DEFAULTS: OpenDesignConfig = {
   modelParams: {},
   enabledModels: [],
   baseURL: DEFAULT_BASE_URL,
+  protocol: DEFAULT_PROTOCOL,
   requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
   streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
 }

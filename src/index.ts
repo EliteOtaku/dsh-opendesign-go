@@ -35,7 +35,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { parseRecoveredProviders, scanSessions } from './session-usage.ts'
 import { readDue } from './quota-cadence.ts'
-import { fetchLatestRelease, pendingUpdate } from './update-check.ts'
+import { compareVersions, fetchLatestRelease, fetchLatestTag, pendingUpdate } from './update-check.ts'
 import { imageResolverOf } from './image-bytes.ts'
 import type { AttachmentsSeam } from './image-bytes.ts'
 import { homedir } from 'node:os'
@@ -255,15 +255,23 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   // DSH has no plugin-wide update action and the desktop profile hides its
   // package manager, so without this an installed copy has no way to learn that
   // a fix was published.
+  //
+  // Both sources are read: the registry decides the npm route, and the
+  // repository tags decide the GitHub route. They can disagree — a tag is
+  // pushed before the registry answers, and a publish can happen without one —
+  // so the notice carries each version separately and the page offers only the
+  // routes that have something to install.
   void (async () => {
-    const release = await fetchLatestRelease()
+    const [release, tag] = await Promise.all([fetchLatestRelease(), fetchLatestTag()])
     const newer = pendingUpdate(PLUGIN_VERSION, release)
-    if (newer === undefined) return
+    const tagNewer = tag !== undefined && compareVersions(tag, PLUGIN_VERSION) > 0 ? tag : undefined
+    if (newer === undefined && tagNewer === undefined) return
     const write = fieldWriterOf(ctx)
     if (write === undefined) return
     const payload = {
       current: PLUGIN_VERSION,
-      latest: newer,
+      ...(newer === undefined ? {} : { latest: newer }),
+      ...(tagNewer === undefined ? {} : { githubLatest: tagNewer }),
       ...(release?.homepage === undefined ? {} : { homepage: release.homepage }),
     }
     void write('updateJson', JSON.stringify(payload)).catch(() => undefined)

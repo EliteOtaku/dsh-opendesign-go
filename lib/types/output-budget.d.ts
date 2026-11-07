@@ -1,11 +1,11 @@
 /**
  * Reconcile the output reservation with the input budget.
  *
- * Chat Completions providers that this adapter talks to check
- * `input + max_tokens ≤ contextWindow` before running a request. The harness,
- * however, judges how full a conversation is from the context window alone and
- * never subtracts the output reservation, so a conversation at 60% of the window
- * can still be refused outright when the model advertises a large output cap.
+ * Both supported surfaces check `input + output reservation ≤ contextWindow`
+ * before running a request. The harness, however, judges how full a conversation
+ * is from the context window alone and never subtracts the output reservation,
+ * so a conversation at 60% of the window can still be refused outright when the
+ * model advertises a large output cap.
  *
  * Two things follow, and both are handled here: the window reported to the
  * harness is the window *available to input*, and the reservation sent upstream
@@ -61,7 +61,7 @@ export declare function fitMaxTokens(requested: number, contextWindow: number, e
  * averaging the two. Image parts are counted at their documented per-image cap
  * rather than at the length of their base64 payload, which would overstate a
  * photograph by three orders of magnitude.
- * @param messages - projected Chat Completions messages.
+ * @param messages - projected request messages, on either surface.
  * @param tools - projected tool declarations, if any.
  * @param imageTokens - tokens to charge per image part.
  * @returns an estimate at or above the true prompt size.

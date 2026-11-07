@@ -1,16 +1,16 @@
 /**
- * OpenDesign Chat Completions inference adapter (M2).
+ * OpenDesign inference adapter.
  *
- * One streaming call per request: the harness vocabulary is projected by
- * `conversion.ts`, the wire call is a single `POST {baseURL}/chat/completions`
- * with `stream: true`, and the SSE response is translated back into
- * {@link StreamChunk}s. Provider failures are named by `gateway-error.ts` so the
- * harness keeps owning retry and recovery.
+ * One streaming call per request. The harness vocabulary is projected by
+ * `conversion.ts` (Chat Completions) or `responses.ts` (Responses), the wire
+ * call is a single `POST {baseURL}/<surface>` with `stream: true`, and the SSE
+ * response is translated back into {@link StreamChunk}s by the module that owns
+ * that surface. Provider failures are named by `gateway-error.ts` so the harness
+ * keeps owning retry and recovery.
  *
- * Deliberately out of scope here: request/idle deadlines from the plugin
- * configuration, protocol selection (Responses/Anthropic) and replay state.
- * Those arrive with M6 and the later milestones; this adapter sends the M2
- * protocol only.
+ * Which surface is spoken comes from {@link OpenDesignConfig.protocol} and is
+ * read per request, so a user switching it does not need a restart. Chat is the
+ * default because it is the only one that returns the model's own reasoning.
  *
  * @module dsh-opendesign-go/adapter
  */
@@ -40,9 +40,20 @@ import { listSeedModels, seedModel } from './catalog.ts'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS, paramsOf } from './model-params.ts'
 import type { ModelParams } from './model-params.ts'
 import { estimatePromptTokens, fitMaxTokens, reservedOutputTokens, usableInputTokens } from './output-budget.ts'
-import { DISPLAY_NAME, type OpenDesignConfig } from './config-contract.ts'
+import { DISPLAY_NAME, type OpenDesignConfig, type ProtocolId } from './config-contract.ts'
 import { toChatMessages, toChatTools } from './conversion.ts'
 import type { ImageDataUrlResolver } from './conversion.ts'
+import { toResponsesRequest, translateResponsesEvent } from './responses.ts'
+import {
+  appendReasoning,
+  appendText,
+  closeOpenBlocks,
+  createStreamState,
+  isRecord,
+  takeIndex,
+  toTokenUsage,
+} from './stream-state.ts'
+import type { StreamState } from './stream-state.ts'
 import {
   GATEWAY_CODES,
   classifyGatewayFailure,
@@ -119,38 +130,6 @@ function reasoningFor(params: ModelParams | undefined): { efforts: { id: Reasoni
       .map((effort) => ({ id: ReasoningEffortId(effort.id), name: effort.name })),
     defaultEffort: ReasoningEffortId(fallback),
   }
-}
-
-/** One text or reasoning block accumulated while streaming. */
-interface TextBlockState {
-  readonly index: number
-  text: string
-}
-
-/** One tool call accumulated while streaming. */
-interface ToolCallState {
-  readonly index: number
-  readonly id: ToolCallId
-  name: string
-  arguments: string
-}
-
-/** Per-response streaming state shared by the SSE translator helpers. */
-interface StreamState {
-  /** Next free block index. */
-  nextIndex: number
-  /** Open text block, if the response produced one. */
-  text: TextBlockState | undefined
-  /** Open reasoning block, if the response produced one. */
-  reasoning: TextBlockState | undefined
-  /** Open tool calls, keyed by the provider's per-message tool-call index. */
-  readonly toolCalls: Map<number, ToolCallState>
-  /** Terminal stop reason once the provider names one. */
-  finishReason: FinishReason | undefined
-  /** Token accounting once the provider reports it. */
-  usage: TokenUsage | undefined
-  /** Blocks that carried content; zero means the response was degenerate. */
-  contentBlocks: number
 }
 
 /**
@@ -295,7 +274,7 @@ export class OpenDesignAdapter extends LlmAdapter {
       const body = response.body
       if (body === null) throw emptyResponseFailure()
       let usage: TokenUsage | undefined
-      for await (const chunk of consumeSse(body)) {
+      for await (const chunk of consumeSse(body, config.protocol)) {
         // Promote the account only once it has produced real output: an account
         // that fails after streaming began must not become the new default.
         if (chunk.type === 'block-end') this.#options.onAccountSettled?.(ref)
@@ -342,10 +321,11 @@ export function isRetryableAccountFailure(failure: unknown): boolean {
 }
 
 /**
- * Send one streaming Chat Completions request.
+ * Send one streaming request on the configured surface.
  * @param options - fully assembled request.
- * @param config - configuration snapshot supplying the endpoint.
+ * @param config - configuration snapshot supplying the endpoint and protocol.
  * @param apiKey - validated credential.
+ * @param resolver - image resolver for models that accept images.
  * @returns the raw HTTP response, whatever its status.
  * @throws LlmError - `INVALID_REQUEST` when no endpoint is configured, or
  * `SERVER` for a transport failure that is not cancellation.
@@ -359,6 +339,34 @@ async function dispatch(
   const baseURL = config.baseURL.replace(/\/+$/u, '')
   if (baseURL === '') throw new LlmError('OpenDesign: baseURL is not configured', GATEWAY_CODES.invalidRequest)
 
+  const header: Record<string, string> = {
+    ...attributionHeaders(),
+    authorization: `Bearer ${apiKey}`,
+    'content-type': 'application/json',
+    accept: 'text/event-stream',
+  }
+
+  const signal = deadlineSignal(options.signal, config.requestTimeoutMs)
+  const url = `${baseURL}/${config.protocol === 'responses' ? 'responses' : 'chat/completions'}`
+  const body = config.protocol === 'responses'
+    ? chatBodyForResponses(options, config, resolver)
+    : chatBody(options, config, resolver)
+
+  return await send(url, header, body, signal, config, options)
+}
+
+/**
+ * Assemble one Chat Completions request body.
+ * @param options - fully assembled request.
+ * @param config - configuration snapshot carrying this model's parameters.
+ * @param resolver - image resolver for models that accept images.
+ * @returns the JSON body to send.
+ */
+function chatBody(
+  options: GenerateOptions,
+  config: OpenDesignConfig,
+  resolver: ImageDataUrlResolver | undefined,
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: options.model,
     messages: toChatMessages(options, resolver),
@@ -387,20 +395,72 @@ async function dispatch(
   // `reasoning_tokens` in the response rather than being ignored.
   if (options.reasoningEffort !== undefined) body.reasoning_effort = options.reasoningEffort
   if (options.stop !== undefined && options.stop.length > 0) body.stop = options.stop
+  return body
+}
 
-  const headers: Record<string, string> = {
-    ...attributionHeaders(),
-    authorization: `Bearer ${apiKey}`,
-    'content-type': 'application/json',
-    accept: 'text/event-stream',
+/**
+ * Assemble one Responses request body.
+ *
+ * The same request, projected by `responses.ts`. Three member names differ from
+ * Chat Completions and one is nested differently: the output cap is
+ * `max_output_tokens`, the thinking control is `reasoning: { effort }`, and the
+ * system prompt travels as `instructions` rather than a message.
+ * `stream_options` has no counterpart — Responses always reports usage on the
+ * terminal event.
+ * @param options - fully assembled request.
+ * @param config - configuration snapshot carrying this model's parameters.
+ * @param resolver - image resolver for models that accept images.
+ * @returns the JSON body to send.
+ */
+function chatBodyForResponses(
+  options: GenerateOptions,
+  config: OpenDesignConfig,
+  resolver: ImageDataUrlResolver | undefined,
+): Record<string, unknown> {
+  const projected = toResponsesRequest(options, resolver)
+  const body: Record<string, unknown> = {
+    model: options.model,
+    ...projected,
+    stream: true,
   }
+  if (options.temperature !== undefined) body.temperature = options.temperature
+  const params = paramsOf(options.model, config.modelParams)
+  const requested = options.maxTokens ?? params?.maxTokens
+  if (requested !== undefined) {
+    const fitted = params === undefined
+      ? requested
+      : fitMaxTokens(requested, params.contextWindow, estimatePromptTokens(projected.input, projected.tools))
+    if (fitted !== undefined) body.max_output_tokens = fitted
+  }
+  if (options.reasoningEffort !== undefined) body.reasoning = { effort: options.reasoningEffort }
+  if (options.stop !== undefined && options.stop.length > 0) body.stop = options.stop
+  return body
+}
 
-  const signal = deadlineSignal(options.signal, config.requestTimeoutMs)
-
+/**
+ * Post one body and name whatever went wrong in transport.
+ * @param url - absolute endpoint.
+ * @param header - request headers.
+ * @param body - JSON body.
+ * @param signal - combined cancellation signal, when one applies.
+ * @param config - configuration snapshot supplying the deadline for the message.
+ * @param options - the request, read only for its own cancellation state.
+ * @returns the raw HTTP response, whatever its status.
+ * @throws LlmError - `TIMEOUT` for our own deadline, `SERVER` for any other
+ * transport failure that is not the caller's cancellation.
+ */
+async function send(
+  url: string,
+  header: Record<string, string>,
+  body: Record<string, unknown>,
+  signal: AbortSignal | undefined,
+  config: OpenDesignConfig,
+  options: GenerateOptions,
+): Promise<Response> {
   try {
-    return await fetch(`${baseURL}/chat/completions`, {
+    return await fetch(url, {
       method: 'POST',
-      headers,
+      headers: header,
       body: JSON.stringify(body),
       ...(signal === undefined ? {} : { signal }),
     })
@@ -475,20 +535,23 @@ function failureDetailFromError(error: Record<string, unknown>, fallback: string
 
 /**
  * Translate one SSE byte stream into chunks.
+ *
+ * The framing is identical on both surfaces — blank-line separated `data:`
+ * events, an optional `[DONE]` sentinel — so only the payload translator is
+ * selected by protocol. Everything after the stream (the empty-response guard,
+ * the closing blocks, usage, finish) is shared, which is what keeps the two
+ * surfaces reporting the same chunk vocabulary.
  * @param body - response body stream.
+ * @param protocol - which surface's event shape to translate.
  * @returns the translated chunks, ending with usage (when reported) and one finish.
  * @throws LlmError - an in-band gateway error, or an empty response.
  */
-async function* consumeSse(body: NonNullable<Response['body']>): AsyncGenerator<StreamChunk> {
-  const state: StreamState = {
-    nextIndex: 0,
-    text: undefined,
-    reasoning: undefined,
-    toolCalls: new Map(),
-    finishReason: undefined,
-    usage: undefined,
-    contentBlocks: 0,
-  }
+async function* consumeSse(
+  body: NonNullable<Response['body']>,
+  protocol: ProtocolId,
+): AsyncGenerator<StreamChunk> {
+  const state = createStreamState()
+  const translate = protocol === 'responses' ? translateResponsesEvent : chatEvent
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -504,7 +567,7 @@ async function* consumeSse(body: NonNullable<Response['body']>): AsyncGenerator<
       done = true
       return []
     }
-    return translateEvent(state, payload)
+    return translate(state, payload)
   }
 
   /** Consume one SSE line. */
@@ -554,12 +617,12 @@ async function* consumeSse(body: NonNullable<Response['body']>): AsyncGenerator<
 }
 
 /**
- * Translate one `data:` payload into chunks.
+ * Translate one Chat Completions `data:` payload into chunks.
  * @param state - per-response streaming state.
  * @param payload - decoded SSE data payload.
  * @returns chunks to emit, in order.
  */
-function translateEvent(state: StreamState, payload: string): StreamChunk[] {
+function chatEvent(state: StreamState, payload: string): StreamChunk[] {
   let event: unknown
   try {
     event = JSON.parse(payload)
@@ -640,26 +703,10 @@ function reasoningText(delta: Record<string, unknown>): string | undefined {
  */
 function collectDelta(state: StreamState, delta: Record<string, unknown>, chunks: StreamChunk[]): void {
   const content = delta.content
-  if (typeof content === 'string' && content !== '') {
-    if (state.text === undefined) {
-      state.text = { index: takeIndex(state), text: '' }
-      state.contentBlocks += 1
-      chunks.push({ type: 'block-start', index: state.text.index, blockType: 'text' })
-    }
-    state.text.text += content
-    chunks.push({ type: 'text-delta', index: state.text.index, text: content })
-  }
+  if (typeof content === 'string' && content !== '') appendText(state, content, chunks)
 
   const reasoning = reasoningText(delta)
-  if (reasoning !== undefined) {
-    if (state.reasoning === undefined) {
-      state.reasoning = { index: takeIndex(state), text: '' }
-      state.contentBlocks += 1
-      chunks.push({ type: 'block-start', index: state.reasoning.index, blockType: 'reasoning' })
-    }
-    state.reasoning.text += reasoning
-    chunks.push({ type: 'reasoning-delta', index: state.reasoning.index, text: reasoning })
-  }
+  if (reasoning !== undefined) appendReasoning(state, reasoning, chunks)
 
   const toolDeltas = delta.tool_calls
   if (!Array.isArray(toolDeltas)) return
@@ -696,56 +743,6 @@ function collectDelta(state: StreamState, delta: Record<string, unknown>, chunks
 }
 
 /**
- * Close every block still open, in first-seen order.
- * @param state - per-response streaming state.
- * @returns the `block-end` chunks carrying each assembled block.
- */
-function closeOpenBlocks(state: StreamState): StreamChunk[] {
-  const open: { index: number; chunk: StreamChunk }[] = []
-
-  if (state.reasoning !== undefined) {
-    const index = state.reasoning.index
-    open.push({
-      index,
-      chunk: { type: 'block-end', index, block: { type: 'reasoning', text: state.reasoning.text } },
-    })
-    state.reasoning = undefined
-  }
-
-  if (state.text !== undefined) {
-    const index = state.text.index
-    open.push({ index, chunk: { type: 'block-end', index, block: { type: 'text', text: state.text.text } } })
-    state.text = undefined
-  }
-
-  for (const call of state.toolCalls.values()) {
-    open.push({
-      index: call.index,
-      chunk: {
-        type: 'block-end',
-        index: call.index,
-        block: { type: 'tool-call', id: call.id, name: call.name, arguments: call.arguments },
-      },
-    })
-  }
-  state.toolCalls.clear()
-
-  open.sort((left, right) => left.index - right.index)
-  return open.map((entry) => entry.chunk)
-}
-
-/**
- * Allocate the next block index.
- * @param state - per-response streaming state.
- * @returns the index this block owns for the whole response.
- */
-function takeIndex(state: StreamState): number {
-  const index = state.nextIndex
-  state.nextIndex += 1
-  return index
-}
-
-/**
  * Map an OpenAI `finish_reason` onto the harness vocabulary.
  * @param reason - provider stop reason.
  * @returns the harness finish reason.
@@ -762,80 +759,6 @@ function mapFinishReason(reason: string): FinishReason {
       // all mean generation ended normally.
       return { kind: 'stop' }
   }
-}
-
-/**
- * Map an OpenAI usage object onto disjoint harness token counts.
- *
- * `prompt_tokens` is an aggregate that already includes cache hits, while
- * {@link TokenUsage} counts uncached input separately; the cache share is
- * subtracted out of `inputTokens`.
- * @param usage - provider usage object.
- * @returns disjoint token accounting, or undefined when the counts are absent.
- */
-function toTokenUsage(usage: Record<string, unknown>): TokenUsage | undefined {
-  const promptTokens = numberValue(usage.prompt_tokens)
-  const completionTokens = numberValue(usage.completion_tokens)
-  if (promptTokens === undefined || completionTokens === undefined) return undefined
-
-  const promptDetails = isRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : undefined
-  const completionDetails = isRecord(usage.completion_tokens_details) ? usage.completion_tokens_details : undefined
-
-  // OpenAI reports hits under prompt_tokens_details; DeepSeek reports them as
-  // a top-level prompt_cache_hit_tokens.
-  const cacheRead =
-    firstNumber(promptDetails === undefined ? undefined : promptDetails.cached_tokens, usage.prompt_cache_hit_tokens) ?? 0
-  // Chat Completions has no cache-write counter of its own; accept the fields a
-  // cache-aware gateway may add rather than inventing a value.
-  const cacheWrite =
-    firstNumber(
-      promptDetails === undefined ? undefined : promptDetails.cache_write_tokens,
-      usage.prompt_cache_write_tokens,
-      usage.cache_creation_input_tokens,
-    ) ?? 0
-  const reasoningTokens =
-    completionDetails === undefined ? undefined : numberValue(completionDetails.reasoning_tokens)
-
-  return {
-    inputTokens: Math.max(0, promptTokens - cacheRead - cacheWrite),
-    outputTokens: completionTokens,
-    // Both counters are aggregates, so their sum is the exact full-call total.
-    totalTokens: promptTokens + completionTokens,
-    ...(cacheRead === 0 ? {} : { cacheReadTokens: cacheRead }),
-    ...(cacheWrite === 0 ? {} : { cacheWriteTokens: cacheWrite }),
-    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
-  }
-}
-
-/**
- * Read one finite number.
- * @param value - candidate value.
- * @returns the number, or undefined when absent or non-finite.
- */
-function numberValue(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-/**
- * Return the first finite number among the candidates.
- * @param values - candidates in priority order.
- * @returns the first number, or undefined when none qualifies.
- */
-function firstNumber(...values: readonly unknown[]): number | undefined {
-  for (const value of values) {
-    const number = numberValue(value)
-    if (number !== undefined) return number
-  }
-  return undefined
-}
-
-/**
- * Narrow an arbitrary value to a plain JSON object.
- * @param value - candidate value.
- * @returns whether the value is a non-null object.
- */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 /**

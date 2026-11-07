@@ -78,6 +78,15 @@
   flex-wrap: wrap;
 }
 
+/* Two mutually exclusive surfaces drawn as one segmented control: the chosen
+   one keeps the primary fill, so the current protocol is readable at a glance
+   instead of being inferred from a switch's position. */
+.protocolPicker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .routeLine {
   display: flex;
   flex-wrap: wrap;

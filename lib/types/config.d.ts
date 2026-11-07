@@ -12,7 +12,7 @@
  * @module dsh-opendesign-go/config
  */
 import z from '@deepseek-ai/schemastery';
-import type { OpenDesignAccount, OpenDesignConfig } from './config-contract.ts';
+import type { OpenDesignAccount, OpenDesignConfig, ProtocolId } from './config-contract.ts';
 /** Deadline for one dispatch, spanning discovery through streaming. */
 export declare const DEFAULT_REQUEST_TIMEOUT_MS = 1800000;
 /** Maximum idle interval while a stream read is outstanding. */
@@ -122,6 +122,10 @@ export interface LiveConfig {
     /** Newest published version, when newer than this build. */
     readonly updateJson: {
         get(): string;
+    };
+    /** Inference surface: `chat` or `responses`. */
+    readonly protocol: {
+        get(): ProtocolId;
     };
     /** Inference base URL, stored as configured. */
     readonly baseURL: {

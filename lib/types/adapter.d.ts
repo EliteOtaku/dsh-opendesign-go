@@ -1,16 +1,16 @@
 /**
- * OpenDesign Chat Completions inference adapter (M2).
+ * OpenDesign inference adapter.
  *
- * One streaming call per request: the harness vocabulary is projected by
- * `conversion.ts`, the wire call is a single `POST {baseURL}/chat/completions`
- * with `stream: true`, and the SSE response is translated back into
- * {@link StreamChunk}s. Provider failures are named by `gateway-error.ts` so the
- * harness keeps owning retry and recovery.
+ * One streaming call per request. The harness vocabulary is projected by
+ * `conversion.ts` (Chat Completions) or `responses.ts` (Responses), the wire
+ * call is a single `POST {baseURL}/<surface>` with `stream: true`, and the SSE
+ * response is translated back into {@link StreamChunk}s by the module that owns
+ * that surface. Provider failures are named by `gateway-error.ts` so the harness
+ * keeps owning retry and recovery.
  *
- * Deliberately out of scope here: request/idle deadlines from the plugin
- * configuration, protocol selection (Responses/Anthropic) and replay state.
- * Those arrive with M6 and the later milestones; this adapter sends the M2
- * protocol only.
+ * Which surface is spoken comes from {@link OpenDesignConfig.protocol} and is
+ * read per request, so a user switching it does not need a restart. Chat is the
+ * default because it is the only one that returns the model's own reasoning.
  *
  * @module dsh-opendesign-go/adapter
  */

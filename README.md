@@ -1,6 +1,6 @@
 # OpenDesign Go for DSH
 
-在 DSH 里使用 OpenDesign Go 订阅的 14 个模型：推理走 OpenAI Chat Completions 协议，额度、用量和多账号都在设置页里。
+在 DSH 里使用 OpenDesign Go 订阅的 14 个模型：推理走 OpenAI 风格的 `chat/completions` 或 `responses`，额度、用量和多账号都在设置页里。
 
 ![OpenDesign Go 设置页：启用开关、输入框额度开关与账号列表](docs/images/setup.png)
 
@@ -20,6 +20,8 @@
 | 功能 | 说明 |
 | --- | --- |
 | 接入 Go 套餐 | 注册一个 `dsh-opendesign-go` provider，提供 Design Plan 的 14 个模型 |
+| 两条接口协议 | 同一网关的 `chat/completions` 与 `responses` 可切换，默认前者；后者只返回被改写的思考摘要 |
+| 一键更新 | 设置页直接调插件的更新通道：主路径走 npm registry，另有「从 GitHub 装」作为兜底 |
 | 用量统计 | 记录每次经本插件发出的请求，按模型汇总输入/输出/缓存 token，并按各厂商公开单价估算成本 |
 | 额度读取 | 勾选后调用本机 OpenDesign 桌面端自带的 `vela` 命令行，读取真实的 5 小时 / 7 天额度窗口 |
 | 输入框额度条 | 选中本插件的模型时，会话输入框旁出现一枚胶囊，显示 5 小时与 7 天的**剩余**百分比，点开可看倒计时、钱包余额与刷新 |
@@ -42,6 +44,7 @@
 | 宿主版本 | `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.2` 三版全部通过 | `npm run test:hosts`，每版在临时目录装齐 12 个 peer，再查符号 / 类型 / 挂载三层 |
 | 网关上下文 | 真实窗口 1,048,576 token，未缩容 | 二分探测：喂 1,036,038 token 返 200，1,053,038 返 400 |
 | 图片输入 | 声明 `image` 的 12 个模型全部能收图并正确识别 | 逐模型发同一张纯色 PNG，直连与经中间件两条链路各跑一遍 |
+| 两条协议 | `chat/completions` 与 `responses` 都能流式、带工具、带图；思考内容只有前者是原始思维链 | 同一批 prompt 各跑一遍，逐事件比对形状与 `reasoning_tokens` |
 | 参数表 | 14 个模型的窗口与输出上限逐条对应厂商文档；`deepseek-v4.1-flash-eco` 与 `minimax-m3.1-flash` 的输出上限无厂商文档，依据实测 | 出处逐条列在 [docs/models.md](docs/models.md) |
 | 额度口径 | credits 与美元 10,000 : 1；5 小时 50,000、7 天 150,000 | 两个窗口独立折算互证，与 `vela` 输出一致；另用 DeepSeek 调用的 credit 增量五次复核，落在 10,067–11,880 |
 | 工具侧图片 | 图片改由紧随其后的 `user` 消息承载，直连与经中间件都到达模型 | 同一条工具结果在两种链路下逐模型比对 |
@@ -110,6 +113,8 @@ dsh plugin --profile web add dsh-opendesign-go
 npm install -g dsh-opendesign-go@latest
 ```
 
+设置页里也有两个更新按钮（见[更新](#更新)），不用记命令。
+
 ### 为什么推荐 npm 而不是 GitHub
 
 npm 包把构建产物和依赖版本一起锁定。GitHub 方式也能用（填 `github:EliteOtaku/dsh-opendesign-go`），但有两个代价：
@@ -125,11 +130,12 @@ npm 包把构建产物和依赖版本一起锁定。GitHub 方式也能用（填
 
 配置写在插件自己的 profile 条目 `opendesign-go` 下，命名空间为 `llm-opendesign-go`。所有字段都是 `volatile()` 引用，改完即时生效，不需要重启。
 
-设置页直接可改的是：启用开关、输入框额度条开关、额度来源、账号列表（含每账号的 `workspaceId`）、模型开关、每模型参数、对账基准。其余字段（`apiKeyEnv`、`baseURL`、`requestTimeoutMs`、`streamIdleTimeoutMs`、`autoSwitch`、`sessionRef`、`workspaceId`、`planOverrides`、`recoveredEnabled`、`recoveredProviders`）目前需要编辑 profile 条目的 config 块。
+设置页直接可改的是：启用开关、接口协议、输入框额度条开关、额度来源、账号列表（含每账号的 `workspaceId`）、模型开关、每模型参数、对账基准。其余字段（`apiKeyEnv`、`baseURL`、`requestTimeoutMs`、`streamIdleTimeoutMs`、`autoSwitch`、`sessionRef`、`workspaceId`、`planOverrides`、`recoveredEnabled`、`recoveredProviders`）目前需要编辑 profile 条目的 config 块。
 
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
 | `enabled` | `true` | 关闭后插件提供的模型从会话选择器中移除 |
+| `protocol` | `chat` | 请求走哪条接口：`chat` 是 `POST {baseURL}/chat/completions`，`responses` 是 `POST {baseURL}/responses`。默认 `chat`，因为只有它返回模型自己的完整思维链 |
 | `apiKeyEnv` | `OPENDESIGN_API_KEY` | 凭据引用名。插件按这个名字向 DSH 凭据服务（或启动环境变量）取 API Key，配置里不放密钥明文 |
 | `accounts` | `[]` | 账号列表，每项含 `id`、`name`、`apiKeyEnv`、可选 `workspaceId`。第一项是当前账号，顺序即故障切换顺序；上限 20 个 |
 | `autoSwitch` | `false` | 开启后，当前账号遇到凭据被拒或额度耗尽时按列表顺序尝试下一个账号 |
@@ -175,6 +181,47 @@ API Key 保存在 DSH 凭据服务里，设置页只显示引用名，不回显�
 胶囊**只在这个插件的模型是当前选择时出现**。别的 provider 花的是另一份额度，把自己的数字摆在别人的请求旁边会误导；同一个位置也可能被其他插件占用，不该并排显示两个互不相干的余额。
 
 详见 [docs/quota.md](docs/quota.md)。
+
+## 接口协议
+
+同一个网关提供两条 OpenAI 风格的接口，设置页的「启用 OpenDesign Go」卡片里可以切换，默认 `chat`：
+
+| 协议 | 端点 | 思考内容 |
+| --- | --- | --- |
+| Chat Completions | `POST {baseURL}/chat/completions` | `reasoning_content` 是模型自己的完整思维链 |
+| Responses | `POST {baseURL}/responses` | 只有 `summary`，是被截断改写的摘要 |
+
+三条实测结论决定了默认值：
+
+- **计费与额度消耗相同**，两条路径走的是同一个模型、同一份额度。
+- **换过去会降级思考显示**：`/responses` 的思考和文本一样是流式增量，但增量内容是对思维过程的**改写摘要**，不是原始思维链。插件把思考块渲染给用户，所以少掉这段是可见的质量损失。
+- **省额度问题两边一样**：预算紧张时空回答的来源是思考 token 吃光 `max_tokens`，与协议无关（同一组英文 prompt，预算 24 时 chat 7/12 空、responses 9/12 空）。
+
+真正需要 Responses 的场合是它的截断信号：它给 `status: "incomplete"` + `incomplete_details.reason`，而 Chat 只有 `finish_reason`。插件已经把两者都映射成同一个 `max-tokens` 停止原因。
+
+Responses 那边有四处字段名不同，插件各自做了投影，不需要用户关心：工具声明是扁平的（无 `function` 包裹）、图片 part 是 `{type:'input_image', image_url: <字符串>}`、系统提示可以放进 `instructions`、输出上限字段叫 `max_output_tokens`。
+
+## 更新
+
+设置页在发现新版本时会显示一张更新卡片，两个按钮：
+
+- **一键更新**（主路径）：走 npm registry，与桌面端插件管理界面同一条 Host 通道（`remote.pluginManager.updateBundle`）。它会先做版本检查，失败时由 Host 自己把旧版装回来。
+- **从 GitHub 装**（兜底）：从仓库标签安装（`github:EliteOtaku/dsh-opendesign-go#vX.Y.Z`）。Host 不允许安装一个 profile 里已有的包名，所以这条路会**先卸载再安装**；本插件在安装失败时会把原版本装回去，并把结果如实写在卡片上。
+
+两个按钮各自只在对应来源有更新时出现：npm 的发布与仓库的标签可能不同步（先打标签后发布是常态），少一个来源就少一个按钮，而不是给一个无版本可装的按钮。
+
+失败原因直接显示在卡片上，最常见的两种：
+
+- **版本刚发布，被 pnpm 拦下**：`ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`。pnpm 11 拒装发布不久的新版本，几小时后再点即可，或由管理员把该版本加进 `pnpm-workspace.yaml` 的白名单。
+- **版本要求的 DSH 比当前运行版本高**：插件管理界面里能看到具体缺哪一项要求。
+
+`restart-required` 会明确写成「已装好 X，重启 DSH 后生效」——文件落地和运行中的宿主换掉模块是两件事，把它显示成「已更新」会让人以为已经在用新版。
+
+非桌面端的 profile（例如 `web`）仍然只有命令行：
+
+```bash
+dsh plugin --profile web add dsh-opendesign-go@latest
+```
 
 ## 模型
 

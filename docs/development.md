@@ -46,6 +46,9 @@ src/
   index.ts              入口：apply(ctx)，注册路由、额度、账本、设置页
   adapter.ts            LlmAdapter 实现：listModels / resolveModel / stream
   conversion.ts         Chat Completions 的请求投影（含图片）
+  responses.ts          Responses 的请求投影与流式事件翻译
+  stream-state.ts       两条协议共用的流式累加器（块、工具调用、usage）
+  output-budget.ts      输入预算估算与 max_tokens 钳制
   catalog.ts            14 个模型的静态目录
   model-params.ts       每模型默认参数、覆盖解析、思考等级
   config.ts             schemastery schema（volatile 热更新）
@@ -62,9 +65,12 @@ src/
   plans.ts              套餐档位与额度覆盖
   pricing.ts            官方价目表快照
   diagnostics.ts        路由诊断
+  update-check.ts       版本检查（npm registry 与 GitHub 标签）
   host-settings.ts      宿主配置挂载（版本兼容）
   gateway-error.ts      网关错误分类
   client/               React 设置页：Section + 各卡片
+    accounts-controller.ts  页面 → 宿主的账号与凭据通道
+    update-controller.ts    页面 → 宿主插件管理器的更新通道
 scripts/                构建、同步 profile、冒烟测试
 tests/                  vitest 单元测试
 ```

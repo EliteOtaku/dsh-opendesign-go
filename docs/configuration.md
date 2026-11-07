@@ -9,6 +9,7 @@
 | 字段 | 界面位置 |
 | --- | --- |
 | `enabled` | 「启用 OpenDesign Go」开关 |
+| `protocol` | 同一张卡片里的「接口协议」两个按钮 |
 | `composerUsage` | 同一张卡片里的「在输入框旁显示额度」开关 |
 | `useVelaCredential` | 「额度来源」开关 |
 | `accounts` | 「账号」卡片：添加、移除、设为当前、更换 Key |
@@ -25,14 +26,22 @@
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | 关闭时撤销 provider 路由，模型从会话选择器消失。插件本身不卸载，设置页仍然可达 |
+| `protocol` | `'chat'` \| `'responses'` | `'chat'` | 请求走哪条接口。`chat` 用 `POST {baseURL}/chat/completions`，`responses` 用 `POST {baseURL}/responses` |
 | `baseURL` | string | `https://amr-link.open-design.ai/v1` | 推理网关基址 |
 | `requestTimeoutMs` | number | `1800000` | 单次请求总超时，覆盖建连到流式结束 |
 | `streamIdleTimeoutMs` | number | `300000` | 流式读取空闲超时的声明值。当前实现只按 `requestTimeoutMs` 判定超时，此字段暂未参与判定 |
 
+`protocol` 的两条路径消费同一份额度、同一批模型，差别在返回的内容：
+
+- `chat`（默认）的思考增量是模型自己的完整思维链（`reasoning_content`）。插件把它渲染成思考块，所以这是唯一不损失信息的选项。
+- `responses` 的思考增量是对思维过程的**改写摘要**（`response.reasoning_summary_text.delta`），文本同样完整，但思考块里看到的不再是原始推理。
+
+切到 `responses` 时请求体跟着换形状：工具声明变成扁平的 `{type:'function', name, description, parameters}`，图片 part 变成 `{type:'input_image', image_url: <字符串>}`，首个 system 消息提升为 `instructions`，输出上限字段是 `max_output_tokens` 而不是 `max_tokens`，思考强度用 `reasoning: { effort }` 而不是 `reasoning_effort`。响应侧没有 `choices[0].finish_reason`：正常结束是 `response.completed`，被截断是 `response.incomplete` + `incomplete_details.reason`，两者都映射成宿主的停止原因。
+
 `baseURL` 的校验规则（`assertBaseURL`）：
 
 - 必须是非空、绝对的 `http` / `https` URL；
-- 不能带查询串（`?`）或片段（`#`）——适配器自己拼接 `/chat/completions`，带查询串会让请求目标静默变形，所以直接拒绝；
+- 不能带查询串（`?`）或片段（`#`）——适配器自己在末尾拼接 `/chat/completions` 或 `/responses`，带查询串会让请求目标静默变形，所以直接拒绝；
 - 末尾斜杠会被去掉。
 
 ### 显示

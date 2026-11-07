@@ -91,11 +91,10 @@ function unsupportedBlock(message: string): LlmError {
  * undefined when this route cannot carry images.
  * @returns text and image parts.
  */
-function partsOf(
+export function partsOf(
   blocks: readonly ContentBlock[],
   resolveImage: ImageDataUrlResolver | undefined,
-): { text: string, images: string[] } {
-  let text = ''
+): { text: string, images: string[] } {  let text = ''
   const images: string[] = []
   for (const block of blocks) {
     switch (block.type) {
@@ -119,7 +118,7 @@ function partsOf(
       }
       case 'file':
         throw unsupportedBlock(
-          'OpenDesign Chat Completions receives files as text handles; a raw file block reached projection',
+          'OpenDesign receives files as text handles; a raw file block reached projection',
         )
       default:
         break
@@ -266,7 +265,7 @@ function toChatMessage(
  * @param existing - text of the leading system-role message.
  * @returns the merged prompt, request prompt first.
  */
-function mergeSystem(system: string, existing: string): string {
+export function mergeSystem(system: string, existing: string): string {
   return existing === '' ? system : `${system}\n\n${existing}`
 }
 

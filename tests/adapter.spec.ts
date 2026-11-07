@@ -23,6 +23,7 @@ const CONFIG: OpenDesignConfig = {
   accounts: null,
   autoSwitch: false,
   baseURL: 'https://gateway.test/v1',
+  protocol: 'chat',
   requestTimeoutMs: 120_000,
   streamIdleTimeoutMs: 30_000,
 }

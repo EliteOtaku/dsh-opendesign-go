@@ -58,6 +58,7 @@ const BASE = {
   refreshNonce: '',
   updateJson: '',
   baseURL: 'https://opencode.ai/inference/go/v1',
+  protocol: 'chat',
   requestTimeoutMs: 300_000,
   streamIdleTimeoutMs: 300_000,
 } as unknown as OpenDesignConfig
@@ -68,7 +69,20 @@ function render(value: OpenDesignConfig, overrides: { status?: string, writable?
     form: staticForm(value, overrides),
     execute: () => Promise.resolve('applied' as const),
     channelState: 'idle',
+    // Never called during a static render: both routes need a click. They are
+    // supplied so the prop shape stays honest rather than being cast away.
+    updateFromNpm: () => Promise.resolve({ ok: true, message: '' }),
+    installFromGithub: () => Promise.resolve({ ok: true, message: '' }),
+    updateState: () => 'ready',
   }))
+}
+
+/** A configuration whose notice names one or both newer versions. */
+function withNotice(notice: { latest?: string, githubLatest?: string }): OpenDesignConfig {
+  return {
+    ...BASE,
+    updateJson: JSON.stringify({ current: '0.1.13', ...notice }),
+  } as unknown as OpenDesignConfig
 }
 
 describe('settings section', () => {
@@ -110,7 +124,37 @@ describe('settings section', () => {
       } as unknown as ConfigForm<OpenDesignConfig>,
       execute: () => Promise.resolve('applied' as const),
       channelState: 'idle',
+      updateFromNpm: () => Promise.resolve({ ok: true, message: '' }),
+      installFromGithub: () => Promise.resolve({ ok: true, message: '' }),
+      updateState: () => 'ready',
     }))
     expect(html).toContain('OpenDesign Go')
+  })
+
+  it('offers both inference surfaces and marks the active one', () => {
+    const html = render(BASE)
+
+    expect(html).toContain('Chat Completions')
+    expect(html).toContain('Responses')
+    // The active button carries the primary fill; the other stays ghost. Static
+    // markup is enough to see which is which.
+    expect(html).toMatch(/Chat Completions/)
+  })
+
+  it('draws the update card only for the routes that have something to install', () => {
+    // The registry answered but the repository tag did not: only the npm button
+    // may appear, because a GitHub button would have no version to name.
+    const npmOnly = render(withNotice({ latest: '0.1.14' }))
+    expect(npmOnly).toContain('一键更新')
+    expect(npmOnly).not.toContain('从 GitHub 装')
+
+    // The reverse: a tag exists before the registry publish lands.
+    const githubOnly = render(withNotice({ githubLatest: '0.1.14' }))
+    expect(githubOnly).toContain('从 GitHub 装')
+    expect(githubOnly).not.toContain('一键更新')
+
+    const neither = render(BASE)
+    expect(neither).not.toContain('一键更新')
+    expect(neither).not.toContain('从 GitHub 装')
   })
 })

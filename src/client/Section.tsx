@@ -1,22 +1,23 @@
 /**
  * The "OpenDesign Go" settings page body.
  *
- * M4a renders three things: the enable switch, the read-only model list the Go
- * plan grants, and the state of the settings document itself. Nothing here
- * guesses at quota or accounts — those need the console session channel and
- * land in M4b.
+ * One page covers the whole route: the enable switch and interface protocol,
+ * the accounts that bill inference, the model list the Go plan grants, the quota
+ * windows and their reconciliation, local usage, and the update card.
  *
- * Styling is inline on purpose: M4a avoids a CSS build pipeline so the client
- * bundle stays a single file. The page adopts the host's tokens when M4b adds
- * the quota surfaces.
+ * Every reading arrives through the same config document — quota, ledger,
+ * diagnostics, update notice — because the host already publishes them there.
+ * Only mutations reach for a Remote namespace, and only two of them: account
+ * writes (`remote.settings` / `remote.credentials`) and plugin updates
+ * (`remote.pluginManager`).
  *
  * @module dsh-opendesign-go/client/Section
  */
 import { useMemo, useState, useEffect, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { PROFILE_ENTRY_ID } from '../config-contract.ts'
-import type { OpenDesignConfig } from '../config-contract.ts'
+import { PROFILE_ENTRY_ID, PROTOCOL_IDS, PROTOCOL_LABELS } from '../config-contract.ts'
+import type { OpenDesignConfig, ProtocolId } from '../config-contract.ts'
 import type { UsageSnapshot } from '../usage-contract.ts'
 import { parseReport, parseUsage } from '../usage-contract.ts'
 import { parseRouteDiagnostics } from '../diagnostics.ts'
@@ -29,6 +30,7 @@ import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 import { ModelsCard } from './ModelsCard.tsx'
 import type { ChannelState, ExecuteAccountCommand } from './accounts-controller.ts'
+import type { RunUpdate, UpdateChannelState, UpdateOutcome } from './update-controller.ts'
 import { Badge, Button, Card, Row, Switch, cx } from './ui/primitives.tsx'
 import tokens from './ui/tokens.module.css'
 import styles from './Section.module.css'
@@ -41,6 +43,12 @@ export interface OpenDesignSectionInjected {
   readonly execute: ExecuteAccountCommand
   /** Reads which step the command channel reached, for diagnostics. */
   readonly channelState: ChannelState
+  /** Updates this plugin through the npm registry. */
+  readonly updateFromNpm: RunUpdate
+  /** Reinstalls this plugin from its repository tag, as the fallback route. */
+  readonly installFromGithub: RunUpdate
+  /** Reads which step the update channel reached, for diagnostics. */
+  readonly updateState: UpdateChannelState
 }
 
 /**
@@ -48,7 +56,14 @@ export interface OpenDesignSectionInjected {
  * @param props - injected config form and optional quota reader.
  * @returns the page body.
  */
-export function OpenDesignSection({ form, execute, channelState }: OpenDesignSectionInjected): ReactElement {
+export function OpenDesignSection({
+  form,
+  execute,
+  channelState,
+  updateFromNpm,
+  installFromGithub,
+  updateState,
+}: OpenDesignSectionInjected): ReactElement {
   const snapshot = useSyncExternalStore(
     (listener) => form.subscribe(listener),
     () => form.getSnapshot(),
@@ -152,6 +167,20 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   }
 
   /**
+   * Switch this route's inference surface.
+   *
+   * Written through the same form as every other field, so the Host validates
+   * it; a refused write is logged rather than silently reverted, because the
+   * switch would otherwise snap back with no explanation.
+   * @param next - the surface the user picked.
+   */
+  const pickProtocol = (next: ProtocolId): void => {
+    void form.set('protocol', next).catch((error: unknown) => {
+      console.error('llm-opendesign-go: could not save the protocol choice', error)
+    })
+  }
+
+  /**
    * Force the settings mirror to reload. The mirror is populated on its own
    * schedule; a page opened before the first describe lands would otherwise sit
    * on `loading` with no way out, so the user gets an explicit retry.
@@ -159,6 +188,35 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
   const retry = (): void => {
     form.getSnapshot()
     window.location.reload()
+  }
+
+  /** Which update route is running, so its button can show it and the other waits. */
+  const [updating, setUpdating] = useState<'npm' | 'github' | undefined>(undefined)
+  /** The last outcome, which replaces the buttons until the page is reloaded. */
+  const [outcome, setOutcome] = useState<UpdateOutcome | undefined>(undefined)
+
+  /**
+   * Run one update route and keep its answer.
+   *
+   * Nothing here reloads automatically: a landed update needs the Host to
+   * restart before it is live, and a reload in the middle of that would read as
+   * "nothing happened". The outcome stays on screen instead.
+   * @param kind - which route to run.
+   * @param run - that route's executor.
+   * @param version - the version to install.
+   */
+  const runUpdate = (kind: 'npm' | 'github', run: RunUpdate, version: string): void => {
+    setUpdating(kind)
+    setOutcome(undefined)
+    void run(version).then((answer) => {
+      setUpdating(undefined)
+      setOutcome(answer)
+    }).catch((error: unknown) => {
+      // The executors already turn failures into messages; reaching here means a
+      // programming error, which still must not leave the button spinning.
+      setUpdating(undefined)
+      setOutcome({ ok: false, message: String(error) })
+    })
   }
 
   return (
@@ -217,6 +275,23 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
             label="在输入框旁显示额度"
             onChange={(next) => { void form.set('composerUsage', next) }}
           />
+        </Row>
+        <Row
+          label="接口协议"
+          hint="两条协议由同一网关提供、计费相同。Chat Completions 会返回模型自己的完整思维链；Responses 只返回被改写的摘要，且预算紧张时空回答略多。"
+        >
+          <div className={styles.protocolPicker}>
+            {PROTOCOL_IDS.map((id) => (
+              <Button
+                key={id}
+                variant={(value?.protocol ?? 'chat') === id ? 'primary' : 'ghost'}
+                disabled={!editable}
+                onClick={() => { pickProtocol(id) }}
+              >
+                {PROTOCOL_LABELS[id]}
+              </Button>
+            ))}
+          </div>
         </Row>
       </Card>
 
@@ -294,12 +369,50 @@ export function OpenDesignSection({ form, execute, channelState }: OpenDesignSec
       </Card>
 
       {update !== undefined && (
-        <div className={cx(styles.notice, styles.noticeInfo)}>
-          <div className={styles.noticeTitle}>有新版本 {update.latest}（当前 {update.current}）</div>
-          <div className={styles.noticeFoot}>
-            桌面端插件管理里卸载重装，或执行 dsh plugin --profile web add dsh-opendesign-go@latest
-          </div>
-        </div>
+        <Card
+          title={`有新版本（当前 ${update.current}）`}
+          description="桌面端插件管理里也能更新；这里的两个按钮走同一条 Host 通道。"
+          badge={outcome === undefined
+            ? undefined
+            : outcome.ok ? <Badge tone="ok">完成</Badge> : <Badge tone="warn">失败</Badge>}
+        >
+          {outcome !== undefined && (
+            <p className={styles.routeLine}>{outcome.message}</p>
+          )}
+          {update.latest !== undefined && (
+            <Row
+              label={`npm：${update.latest}`}
+              hint="走 npm registry，与插件管理界面同一条路径。刚发布的版本可能被 pnpm 的最短发布时长检查拦下，几小时后再试即可。"
+            >
+              <Button
+                variant="primary"
+                disabled={updating !== undefined}
+                onClick={() => { runUpdate('npm', updateFromNpm, update.latest as string) }}
+              >
+                {updating === 'npm' ? '更新中…' : '一键更新'}
+              </Button>
+            </Row>
+          )}
+          {update.githubLatest !== undefined && (
+            <Row
+              label={`GitHub：v${update.githubLatest}`}
+              hint="从仓库标签安装。会先卸载当前版本再装，失败时自动装回原版本；适合 registry 还没轮到、或想装回某个具体版本。"
+            >
+              <Button
+                variant={update.latest === undefined ? 'primary' : 'ghost'}
+                disabled={updating !== undefined}
+                onClick={() => { runUpdate('github', installFromGithub, update.githubLatest as string) }}
+              >
+                {updating === 'github' ? '安装中…' : '从 GitHub 装'}
+              </Button>
+            </Row>
+          )}
+          <p className={styles.routeLine}>
+            {/* The stage is shown because "nothing happened" on a failed click is
+                indistinguishable from a page that never wired the namespace. */}
+            <span className={styles.noticeFoot}>更新通道：{updateState()}</span>
+          </p>
+        </Card>
       )}
 
       <div className={styles.footer}>

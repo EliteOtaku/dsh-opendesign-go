@@ -56,6 +56,7 @@ function formWith(overrides: Partial<OpenDesignConfig>): ConfigForm<OpenDesignCo
     refreshNonce: '',
     updateJson: '',
     baseURL: 'https://example.test/v1',
+    protocol: 'chat',
     requestTimeoutMs: 1_000,
     streamIdleTimeoutMs: 1_000,
     ...overrides,
