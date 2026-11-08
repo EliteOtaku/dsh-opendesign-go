@@ -59,7 +59,10 @@ export declare function parseLatestRelease(body: unknown): LatestRelease | undef
  * Never throws: an unreachable registry must not affect plugin startup, so every
  * failure path returns undefined and the caller simply shows nothing.
  * @param fetchImpl - fetch implementation, injected for tests.
- * @param timeoutMs - request deadline; the registry answers in well under this.
+ * @param timeoutMs - request deadline. Generous on purpose: this runs during
+ * startup, when the machine is still bringing its network stack up and a
+ * five-second deadline was observed to miss while a minute later the same
+ * request answered in 0.4 s.
  * @returns the release, or undefined when it could not be read.
  */
 export declare function fetchLatestRelease(fetchImpl?: typeof fetch, timeoutMs?: number): Promise<LatestRelease | undefined>;

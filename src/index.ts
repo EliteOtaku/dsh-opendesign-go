@@ -93,6 +93,17 @@ const PUBLISH_MIN_INTERVAL_MS = 5 * 60 * 1000
  * lines instead of a spin.
  */
 const CACHE_RETRY_MS = [3_000, 12_000, 30_000] as const
+
+/**
+ * How long to wait before asking both version sources a second time.
+ *
+ * The startup check runs while the Host is still opening its own profile. A
+ * start observed on 2026-11-08 lost both requests to their deadline there, while
+ * the same machine answered them in 0.4 s and 2.1 s a minute later. Retrying once
+ * turns "could not check" into a real answer on exactly those starts; a second
+ * miss is then taken as the truth until the next restart.
+ */
+const VERSION_RECHECK_MS = 60_000
 import { fieldWriterOf, installHostSettings } from './host-settings.ts'
 import { createCacheRetry } from './cache-retry.ts'
 import type { CacheSnapshot } from './cache-retry.ts'
@@ -298,21 +309,43 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
 
   void refreshIfConfigured()
 
-  // One registry read per start. Both sources are written whenever they answer,
-  // even when neither is newer: the settings page shows what each source last
-  // reported, and "did not answer" has to stay distinguishable from "no update".
-  void (async () => {
+  // One registry read per start, and one more a minute later when the first
+  // misses. Both sources are written whenever they answer, even when neither is
+  // newer: the settings page shows what each source last reported, and "did not
+  // answer" has to stay distinguishable from "no update".
+  let versionRetryTimer: ReturnType<typeof setTimeout> | undefined
+  ctx.effect(() => () => {
+    if (versionRetryTimer !== undefined) clearTimeout(versionRetryTimer)
+  })
+
+  /** Read both versions, record the snapshot, and report whether both answered. */
+  const checkVersions = async (): Promise<boolean> => {
+    const started = Date.now()
     const [release, tag] = await Promise.all([fetchLatestRelease(), fetchLatestTag()])
-    const write = fieldWriterOf(ctx)
-    if (write === undefined) return
-    const json = snapshotOf(release, tag)
-    // This runs once per start, so a refused write would leave the page with no
-    // snapshot at all until the next restart — the one case where a retry is
-    // worth more than the lock it costs.
-    void updateRetry.publish(
-      () => ({ fingerprint: json, json }),
-      (value) => write('updateJson', value),
+    // Logged every time. The fetch helpers swallow failures on purpose — a miss
+    // says nothing about whether inference works — but a swallowed failure in
+    // the only source of this number leaves the page saying "unknown" with no way
+    // to tell a deadline from an HTTP status.
+    ctx.logger.info(
+      `llm-opendesign-go: version check npm=${release?.version ?? 'miss'} github=${tag ?? 'miss'} (${Date.now() - started}ms)`,
     )
+    const write = fieldWriterOf(ctx)
+    if (write !== undefined) {
+      const json = snapshotOf(release, tag)
+      // This runs at most twice per start, so a refused write would leave the
+      // page with no snapshot at all until the next restart — the one case where
+      // a retry is worth more than the lock it costs.
+      void updateRetry.publish(
+        () => ({ fingerprint: json, json }),
+        (value) => write('updateJson', value),
+      )
+    }
+    return release !== undefined && tag !== undefined
+  }
+
+  void (async () => {
+    if (await checkVersions()) return
+    versionRetryTimer = setTimeout(() => { void checkVersions() }, VERSION_RECHECK_MS)
   })()
 
   /** Configuration inputs that call for a fresh reading. */
