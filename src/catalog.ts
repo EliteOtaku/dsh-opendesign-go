@@ -82,5 +82,105 @@ export function listSeedModels(provider: string): readonly {
   })
 }
 
+/** Where a catalog snapshot came from. */
+export type CatalogSource = 'gateway' | 'fallback'
+
+/** One reading of the models this account may use. */
+export interface CatalogSnapshot {
+  /** When the reading was taken, when the writer recorded it. */
+  readonly asOf: string | undefined
+  /** Whether the ids came from the gateway or from the bundled list. */
+  readonly source: CatalogSource
+  /** Model ids in display order. Empty is a real answer, not a missing one. */
+  readonly ids: readonly string[]
+  /** Why the bundled list was used, when it was. */
+  readonly error: string | undefined
+}
+
+/** Capitalisation the derivation cannot guess from a hyphenated id. */
+const NAME_FIXES: Readonly<Record<string, string>> = Object.freeze({
+  deepseek: 'DeepSeek',
+  gpt: 'GPT',
+  glm: 'GLM',
+  kimi: 'Kimi',
+  mimo: 'MiMo',
+  minimax: 'MiniMax',
+  openai: 'OpenAI',
+  claude: 'Claude',
+  gemini: 'Gemini',
+  grok: 'Grok',
+  qwen: 'Qwen',
+  hy: 'Hunyuan',
+  seed: 'Seedream',
+})
+
+/**
+ * Human-readable name for a model id.
+ *
+ * The bundled table wins where it has an entry, because those names are spelled
+ * the way the vendor spells them and no derivation reproduces that. Everything
+ * else is derived, which is imprecise but legible and needs no maintenance when
+ * the gateway adds a model.
+ * @param id - model id from the catalog.
+ * @returns a display name.
+ */
+export function displayNameOf(id: string): string {
+  const known = GO_DESIGN_PLAN_MODELS.find((model) => model.id === id)
+  if (known !== undefined) return known.name
+  if (id.length === 0) return ''
+  return id.split('-').map((part) => {
+    const fix = NAME_FIXES[part.toLowerCase()]
+    if (fix !== undefined) return fix
+    // Version and size segments keep whatever casing the gateway used.
+    if (/^\d/u.test(part)) return part
+    return part.length === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1)
+  }).join(' ')
+}
+
+/**
+ * Read the catalog snapshot from its serialized settings field.
+ *
+ * A malformed value reads as "no snapshot" rather than throwing: the field is
+ * written by a background read, and one bad character must not take the whole
+ * settings page down.
+ * @param raw - serialized snapshot, or undefined/empty when unset.
+ * @returns the snapshot, or undefined when absent or unusable.
+ */
+export function parseCatalog(raw: string | undefined): CatalogSnapshot | undefined {
+  if (raw === undefined || raw.length === 0) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+  const row = parsed as Record<string, unknown>
+  const ids = row.ids
+  if (!Array.isArray(ids)) return undefined
+  const clean = ids.filter((id): id is string => typeof id === 'string' && id.length > 0)
+  const source: CatalogSource = row.source === 'fallback' ? 'fallback' : 'gateway'
+  return {
+    asOf: typeof row.asOf === 'string' && row.asOf.length > 0 ? row.asOf : undefined,
+    source,
+    ids: clean,
+    error: typeof row.error === 'string' && row.error.length > 0 ? row.error : undefined,
+  }
+}
+
+/**
+ * Project a snapshot into the rows every consumer renders.
+ *
+ * A missing snapshot means the read has not landed, so the bundled list stands
+ * in; an *empty* snapshot means the account grants nothing, and substituting the
+ * bundled list there would advertise models the account cannot call.
+ * @param snapshot - parsed snapshot, or undefined when none was ever written.
+ * @returns rows in display order.
+ */
+export function catalogRowsOf(snapshot: CatalogSnapshot | undefined): readonly CatalogModel[] {
+  if (snapshot === undefined) return GO_DESIGN_PLAN_MODELS
+  return snapshot.ids.map((id) => ({ id, name: displayNameOf(id) }))
+}
+
 /** Route this catalog belongs to. */
 export { PROVIDER_ID }
