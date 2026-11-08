@@ -130,10 +130,15 @@ export function installHostSettings(ctx: Context): void {
  * entry already carries — and what this process last wrote — before touching the
  * document. A poll that answers the same way as last time therefore costs one
  * `describe()` and no I/O.
+ *
+ * The result is whether the document now carries the value, not whether this
+ * call wrote it: "already there" and "just written" are the same answer to every
+ * caller. A refusal resolves false instead of throwing, because the caller — keyed
+ * cache or not — is the only place that knows whether the value is worth retrying.
  * @param ctx - host context that may carry a settings service.
  * @returns a writer for a named field, or undefined when this host cannot write.
  */
-export function fieldWriterOf(ctx: Context): ((field: string, json: string) => Promise<void>) | undefined {
+export function fieldWriterOf(ctx: Context): ((field: string, json: string) => Promise<boolean>) | undefined {
   /** Resolve the settings service at write time, not at capture time. */
   const settingsOf = (): ProfileSettings | undefined => {
     const settings = ctx.get('settings') as ProfileSettings | undefined
@@ -157,7 +162,7 @@ export function fieldWriterOf(ctx: Context): ((field: string, json: string) => P
     // recomposes this very plugin tree — so an unchanged value must never reach
     // `update`. The last write is checked first because `describe()` lags the
     // document by one recomposition.
-    if (written.get(field) === json) return
+    if (written.get(field) === json) return true
 
     // The entry reaches the projection on the settings service's own schedule,
     // not at `apply` time, so an early write finds no service or no row yet.
@@ -181,14 +186,14 @@ export function fieldWriterOf(ctx: Context): ((field: string, json: string) => P
       ctx.logger.warn(
         `llm-opendesign-go: no settings row for "${PROFILE_ENTRY_ID}"; ${field} was not cached`,
       )
-      return
+      return false
     }
 
     for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt += 1) {
       const settings = settingsOf()
       if (settings === undefined) {
         ctx.logger.warn(`llm-opendesign-go: settings service went away; ${field} was not cached`)
-        return
+        return false
       }
       // Re-read on every attempt: the row carries the live value and the
       // revision the write must fence against, and both can move while a
@@ -196,15 +201,15 @@ export function fieldWriterOf(ctx: Context): ((field: string, json: string) => P
       const current = settings.describe!().find((candidate) => candidate.ns === PROFILE_ENTRY_ID)
       if (current === undefined) {
         ctx.logger.warn(`llm-opendesign-go: settings row for "${PROFILE_ENTRY_ID}" vanished; ${field} was not cached`)
-        return
+        return false
       }
-      if (current.value?.[field] === json || written.get(field) === json) return
+      if (current.value?.[field] === json || written.get(field) === json) return true
       try {
         // Fence on the revision just read: a concurrent edit from the page must
         // win rather than be silently overwritten by a background refresh.
         await settings.update!(PROFILE_ENTRY_ID, { [field]: json }, current.revision)
         written.set(field, json)
-        return
+        return true
       } catch (error) {
         const code = errorCodeOf(error)
         if (code === 'SETTINGS_CONFLICT') {
@@ -213,10 +218,11 @@ export function fieldWriterOf(ctx: Context): ((field: string, json: string) => P
           continue
         }
         ctx.logger.warn(`llm-opendesign-go: could not cache ${field} (${String(error)})`)
-        return
+        return false
       }
     }
     ctx.logger.warn(`llm-opendesign-go: gave up caching ${field} after a revision conflict`)
+    return false
   }
 }
 

@@ -21,11 +21,12 @@ import type { OpenDesignConfig, ProtocolId } from '../config-contract.ts'
 import type { UsageSnapshot } from '../usage-contract.ts'
 import { parseReport, parseUsage } from '../usage-contract.ts'
 import { parseRouteDiagnostics } from '../diagnostics.ts'
+import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
 import { QuotaCard } from './QuotaCard.tsx'
 import { BillingCard } from './BillingCard.tsx'
 import { parseBaseline, parsePlanOverrides, planOf } from '../plans.ts'
 import { parseUpdate } from '../update-check.ts'
-import { explainRouteProblem } from './route-explanation.ts'
+import { explainRouteProblem, modelCountOf } from './route-explanation.ts'
 import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 import { ModelsCard } from './ModelsCard.tsx'
@@ -98,6 +99,10 @@ export function OpenDesignSection({
   // Explains an empty model picker where the status line alone was not enough:
   // "未注册" states the symptom, not the cause or the fix.
   const routeProblem = useMemo(() => explainRouteProblem(routeState), [routeState])
+  const modelCount = useMemo(
+    () => modelCountOf(routeState, GO_DESIGN_PLAN_MODELS.length),
+    [routeState],
+  )
 
   /**
    * Ask the host for a reading now.
@@ -352,19 +357,27 @@ export function OpenDesignSection({
         {routeState === undefined ? (
           <p className={styles.routeLine}>宿主尚未上报路由状态。重启后若仍为空，说明插件未完成激活。</p>
         ) : (
-          <p className={styles.routeLine}>
-            <span>启用={String(routeState.enabled)}</span>
-            <span className={styles.footerSep}>·</span>
-            <span>凭据={routeState.credentialResolved ? '已解析' : '未解析'}（{routeState.triedRef || '无'}）</span>
-            <span className={styles.footerSep}>·</span>
-            <span>声明模型 {routeState.modelCount} 个</span>
-            {routeState.lastError !== undefined && (
-              <>
-                <span className={styles.footerSep}>·</span>
-                <span>失败：{routeState.lastError}</span>
-              </>
+          <>
+            <p className={styles.routeLine}>
+              <span>启用={String(routeState.enabled)}</span>
+              <span className={styles.footerSep}>·</span>
+              <span>凭据={routeState.credentialResolved ? '已解析' : '未解析'}（{routeState.triedRef || '无'}）</span>
+              <span className={styles.footerSep}>·</span>
+              <span>声明模型 {modelCount.count} 个</span>
+              {routeState.lastError !== undefined && (
+                <>
+                  <span className={styles.footerSep}>·</span>
+                  <span>失败：{routeState.lastError}</span>
+                </>
+              )}
+            </p>
+            {modelCount.stale && (
+              <p className={styles.routeLine}>
+                宿主缓存的是 {routeState.modelCount} 个，与本版本的 {modelCount.count} 个不一致。
+                缓存只在写回成功时刷新，而写回要抢 profile 的写锁；上面的数字以本版本目录为准。
+              </p>
             )}
-          </p>
+          </>
         )}
       </Card>
 

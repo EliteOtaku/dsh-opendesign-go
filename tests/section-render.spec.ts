@@ -157,4 +157,26 @@ describe('settings section', () => {
     expect(neither).not.toContain('一键更新')
     expect(neither).not.toContain('从 GitHub 装')
   })
+
+  it('shows the model count this build carries, not a stale cached one', () => {
+    // The page reads the count from the host's cached report, which only moves
+    // when a write lands. A refused write froze it at 12 while the catalog had
+    // 14, so the page now trusts its own catalog and says the cache is behind.
+    const stale = render({
+      ...BASE,
+      diagnosticsJson: JSON.stringify({
+        registered: true,
+        enabled: true,
+        credentialResolved: true,
+        triedRef: 'OPENDESIGN_API_KEY',
+        modelCount: 12,
+        asOf: '2026-10-20T15:40:17.194Z',
+      }),
+    } as unknown as OpenDesignConfig)
+    expect(stale).toContain('声明模型 14 个')
+    expect(stale).toContain('宿主缓存的是 12 个')
+
+    // With no report at all there is nothing stale to mention.
+    expect(render(BASE)).toContain('宿主尚未上报路由状态')
+  })
 })

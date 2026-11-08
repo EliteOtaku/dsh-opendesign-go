@@ -81,7 +81,21 @@ const REPORT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
  * write being avoided.
  */
 const PUBLISH_MIN_INTERVAL_MS = 5 * 60 * 1000
+
+/**
+ * How long to wait before republishing a cached field the host refused.
+ *
+ * A refusal is nearly always the profile's writer lock being held by someone
+ * else — the App rewriting its own composition, or a plugin install — and the
+ * host gives up on the lock after two seconds. Waiting longer than that lets the
+ * other writer finish; three attempts over roughly 45 seconds covers a slow
+ * install while keeping a profile that genuinely cannot be written to three log
+ * lines instead of a spin.
+ */
+const CACHE_RETRY_MS = [3_000, 12_000, 30_000] as const
 import { fieldWriterOf, installHostSettings } from './host-settings.ts'
+import { createCacheRetry } from './cache-retry.ts'
+import type { CacheSnapshot } from './cache-retry.ts'
 import { createThrottle, systemClock } from './throttle.ts'
 import { OpenDesignUsageService, sessionResolverOf } from './usage.ts'
 import { DEFAULT_SESSION_REF } from './config-contract.ts'
@@ -126,6 +140,37 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   ctx.logger.info('llm-opendesign-go: mounted')
   installHostSettings(ctx)
 
+  /**
+   * Retries for the two cached fields that are written once per change.
+   *
+   * The other two cached fields — the quota reading and the usage report — are
+   * republished by a timer, so a refused write heals on the next poll. These two
+   * are not: nothing touches them again until the facts move, so a refusal has
+   * to be retried here or the page keeps the value it happened to see at boot.
+   */
+  const diagnosticsRetry = createCacheRetry({
+    delays: CACHE_RETRY_MS,
+    onRetry: (delayMs, attempt) => {
+      ctx.logger.info(`llm-opendesign-go: retrying diagnosticsJson in ${delayMs}ms (attempt ${attempt})`)
+    },
+    onGiveUp: (attempts) => {
+      ctx.logger.warn(`llm-opendesign-go: diagnosticsJson is still not cached after ${attempts} attempts`)
+    },
+  })
+  const updateRetry = createCacheRetry({
+    delays: CACHE_RETRY_MS,
+    onRetry: (delayMs, attempt) => {
+      ctx.logger.info(`llm-opendesign-go: retrying updateJson in ${delayMs}ms (attempt ${attempt})`)
+    },
+    onGiveUp: (attempts) => {
+      ctx.logger.warn(`llm-opendesign-go: updateJson is still not cached after ${attempts} attempts`)
+    },
+  })
+  ctx.effect(() => () => {
+    diagnosticsRetry.dispose()
+    updateRetry.dispose()
+  })
+
   // The quota channel is off until the user stores a console session reference:
   // it reads account state far beyond inference, so it is opt-in by design.
   const usage = new OpenDesignUsageService({
@@ -169,7 +214,9 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       pendingUsage = undefined
       const write = fieldWriterOf(ctx)
       if (write === undefined) return
-      void write('usageJson', JSON.stringify(snapshot)).catch(() => undefined)
+      // Refusals are left to the next poll: this field is republished by the
+      // quota timer, so a missed write costs one interval rather than sticking.
+      void write('usageJson', JSON.stringify(snapshot))
     },
   })
   ctx.effect(() => () => { usageThrottle.dispose() })
@@ -274,7 +321,14 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       ...(tagNewer === undefined ? {} : { githubLatest: tagNewer }),
       ...(release?.homepage === undefined ? {} : { homepage: release.homepage }),
     }
-    void write('updateJson', JSON.stringify(payload)).catch(() => undefined)
+    const json = JSON.stringify(payload)
+    // This runs once per start, so a refused write would leave the page with no
+    // notice at all until the next restart — the one case where a retry is worth
+    // more than the lock it costs.
+    void updateRetry.publish(
+      () => ({ fingerprint: json, json }),
+      (value) => write('updateJson', value),
+    )
   })()
 
   /** Configuration inputs that call for a fresh reading. */
@@ -411,7 +465,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       const base = summarize(ledger.all(), now - REPORT_WINDOW_MS, now)
       const recovered = recoveredSpend()
       const report = recovered === undefined ? base : { ...base, recovered }
-      void write('reportJson', JSON.stringify(report)).catch(() => undefined)
+      void write('reportJson', JSON.stringify(report))
     },
   })
   const publishReport = (): void => { reportThrottle.request() }
@@ -512,15 +566,6 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   })
 
   /**
-   * Add or withdraw the route so its presence always matches "enabled and
-   * credential available". Nothing else is torn down with it: discovery and
-   * (from M4) the settings section stay mounted so the page that owns the
-   * switch remains reachable.
-   * @param configured - whether the credential resolved.
-   */
-  /** The last published route facts, excluding the timestamp. */
-  let lastDiagnostics: string | undefined
-  /**
    * Publish what the routing layer currently believes.
    *
    * The model picker shows nothing when the route is absent, and the reason can
@@ -533,30 +578,42 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * tree recomposition — for each of them, while the answer almost never moves.
    * The timestamp therefore follows the last real change rather than the last
    * call.
+   *
+   * Because nothing calls this again until the facts move, a refused write has
+   * to be retried here: with the watermark advancing on the attempt rather than
+   * on the result, one refusal at boot left the page reporting twelve declared
+   * models while fourteen were registered, and no later event could repair it.
    * @param configured - whether the selected account's credential resolved.
    * @param triedRef - the reference that was resolved.
    * @param lastError - registration failure, when one occurred.
    */
   const publishDiagnostics = (configured: boolean, triedRef: string, lastError?: string): void => {
-    const payload: RouteDiagnostics = {
-      registered: registration !== undefined,
-      enabled: current().enabled,
-      credentialResolved: configured,
-      triedRef,
-      ...(lastError === undefined ? {} : { lastError }),
-      modelCount: listSeedModels(PROVIDER_ID).length,
-      attachmentsMounted: attachments !== undefined,
-      asOf: new Date().toISOString(),
-    }
-    const { asOf: _asOf, ...facts } = payload
-    const fingerprint = JSON.stringify(facts)
-    if (fingerprint === lastDiagnostics) return
     const write = fieldWriterOf(ctx)
     if (write === undefined) return
-    lastDiagnostics = fingerprint
-    void write('diagnosticsJson', JSON.stringify(payload)).catch(() => undefined)
+    const snapshot = (): CacheSnapshot => {
+      const payload: RouteDiagnostics = {
+        registered: registration !== undefined,
+        enabled: current().enabled,
+        credentialResolved: configured,
+        triedRef,
+        ...(lastError === undefined ? {} : { lastError }),
+        modelCount: listSeedModels(PROVIDER_ID).length,
+        attachmentsMounted: attachments !== undefined,
+        asOf: new Date().toISOString(),
+      }
+      const { asOf: _asOf, ...facts } = payload
+      return { fingerprint: JSON.stringify(facts), json: JSON.stringify(payload) }
+    }
+    void diagnosticsRetry.publish(snapshot, (json) => write('diagnosticsJson', json))
   }
 
+  /**
+   * Add or withdraw the route so its presence always matches "enabled and
+   * credential available". Nothing else is torn down with it: discovery and
+   * (from M4) the settings section stay mounted so the page that owns the
+   * switch remains reachable.
+   * @param configured - whether the credential resolved.
+   */
   const applyRoute = (configured: boolean, triedRef = ''): void => {
     const enabled = current().enabled
     if (configured && enabled && registration === undefined) {

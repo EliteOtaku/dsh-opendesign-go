@@ -153,7 +153,7 @@ npm 包把构建产物和依赖版本一起锁定。GitHub 方式也能用（填
 | `recoveredEnabled` | `false` | 是否从本机会话日志补算未经本插件的 OpenDesign 调用 |
 | `recoveredProviders` | `''` | 补算时计入的 provider 名，逗号分隔；空值用 `opendesign,dsh-opendesign-go` |
 
-另外三个字段 `usageJson`、`reportJson`、`diagnosticsJson` 是插件写入的缓存与诊断信息，设置页只读，不建议手改。
+另外四个字段 `usageJson`、`reportJson`、`diagnosticsJson`、`updateJson` 是插件写入的缓存与诊断信息，设置页只读，不建议手改。写回要抢 profile 的写锁，被拒时前两者留给下一轮轮询自愈，后两者（每个进程只写一次）按 3 秒 / 12 秒 / 30 秒退避重试三次。
 
 完整的字段语义、取值约束和示例见 [docs/configuration.md](docs/configuration.md)。
 

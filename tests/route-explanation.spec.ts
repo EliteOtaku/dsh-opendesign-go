@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { explainRouteProblem } from '../src/client/route-explanation.ts'
+import { explainRouteProblem, modelCountOf } from '../src/client/route-explanation.ts'
 import type { RouteDiagnostics } from '../src/diagnostics.ts'
 
 /** A healthy route, which is the baseline the cases below deviate from. */
@@ -74,5 +74,22 @@ describe('explainRouteProblem', () => {
       credentialResolved: false,
     })
     expect(problem?.causes.length).toBe(2)
+  })
+})
+
+describe('modelCountOf', () => {
+  it('reports the catalog this build carries', () => {
+    expect(modelCountOf(healthy, 14)).toEqual({ count: 14, stale: false })
+  })
+
+  it('prefers the catalog when the cached report disagrees', () => {
+    // The regression this guards: a write refused at boot froze the cached count
+    // at 12 while 14 models were registered, and nothing ever refreshed it. The
+    // number must follow the code that is actually serving requests.
+    expect(modelCountOf({ ...healthy, modelCount: 12 }, 14)).toEqual({ count: 14, stale: true })
+  })
+
+  it('uses the catalog before the host has reported', () => {
+    expect(modelCountOf(undefined, 14)).toEqual({ count: 14, stale: false })
   })
 })

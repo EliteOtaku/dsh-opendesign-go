@@ -166,4 +166,31 @@ describe('fieldWriterOf', () => {
     await write('usageJson', '{"a":2}')
     expect(host.updates.map((row) => Object.keys(row.patch)[0])).toEqual(['usageJson', 'reportJson'])
   })
+
+  it('reports whether the document carries the value, not whether this call wrote it', async () => {
+    // Callers retry on false, so "already there" must count as success — otherwise
+    // an unchanged poll would look like a failure and be retried for nothing.
+    const host = fakeHost({ values: { usageJson: '{"a":1}' } })
+    const write = fieldWriterOf(host.ctx)!
+    await expect(write('usageJson', '{"a":1}')).resolves.toBe(true)
+    await expect(write('usageJson', '{"a":2}')).resolves.toBe(true)
+    expect(host.updates).toHaveLength(1)
+  })
+
+  it('reports a refused write so the caller can retry it', async () => {
+    // The refusal is what the retry exists for: the host's writer lock was held
+    // by something else, and the value is still not in the document.
+    const host = fakeHost({ values: { usageJson: '{"a":1}' }, failures: [new Error('timed out waiting for the writer lock')] })
+    const write = fieldWriterOf(host.ctx)!
+    await expect(write('usageJson', '{"a":2}')).resolves.toBe(false)
+    // Nothing was remembered, so a later attempt still sees the write as pending.
+    await expect(write('usageJson', '{"a":2}')).resolves.toBe(true)
+    expect(host.updates).toHaveLength(2)
+  })
+
+  it('reports failure when the entry never appears', async () => {
+    const host = fakeHost({ present: false })
+    const write = fieldWriterOf(host.ctx)!
+    await expect(write('usageJson', '{"a":1}')).resolves.toBe(false)
+  })
 })

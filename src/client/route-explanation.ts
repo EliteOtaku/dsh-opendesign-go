@@ -1,5 +1,5 @@
 /**
- * Explains why the model picker might be empty.
+ * Explain why the model picker might be empty.
  *
  * The failure this addresses is the one the user hit: the settings page renders
  * normally while the session model picker shows nothing, and the only clue is a
@@ -10,6 +10,11 @@
  * The route can be absent for four different reasons, three of which the user can
  * fix. Naming them is the whole point: the fix differs completely between a
  * missing profile entry and an unresolved credential.
+ *
+ * This module also answers "how many models does this build advertise": the
+ * cached report is a mirror written by the host, so it can lag the catalog the
+ * page is running against, and the page must never show the stale number as if
+ * it were current.
  *
  * @module dsh-opendesign-go/route-explanation
  */
@@ -76,4 +81,36 @@ export function explainRouteProblem(diagnostics: RouteDiagnostics | undefined): 
     title: '模型没有注册，会话的模型选择器里看不到它们',
     causes,
   }
+}
+
+/** How many models this build advertises, as the page should report it. */
+export interface ModelCount {
+  /** The number to display. */
+  readonly count: number
+  /**
+   * Whether the number came from the cached report rather than this build.
+   *
+   * True means the host's mirror is out of date — it says a different number than
+   * the catalog in this bundle — so the page shows the live count and says so,
+   * instead of presenting a stale figure as current.
+   */
+  readonly stale: boolean
+}
+
+/**
+ * Reconcile the cached model count with the catalog this build carries.
+ *
+ * The count is written into the config document by the host and read back by the
+ * page, so it only moves when a write lands. One refused write at boot left it
+ * reporting twelve models while fourteen were registered, and nothing refreshed
+ * it afterwards; the page now compares the cached figure against its own catalog
+ * and prefers the catalog, because this bundle is the code actually serving
+ * requests.
+ * @param diagnostics - last reported route state, or undefined when never reported.
+ * @param advertised - models this build advertises.
+ * @returns the count to show and whether the report disagreed.
+ */
+export function modelCountOf(diagnostics: RouteDiagnostics | undefined, advertised: number): ModelCount {
+  if (diagnostics === undefined) return { count: advertised, stale: false }
+  return { count: advertised, stale: diagnostics.modelCount !== advertised }
 }

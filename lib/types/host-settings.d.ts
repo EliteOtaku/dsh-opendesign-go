@@ -31,10 +31,15 @@ export declare function installHostSettings(ctx: Context): void;
  * entry already carries — and what this process last wrote — before touching the
  * document. A poll that answers the same way as last time therefore costs one
  * `describe()` and no I/O.
+ *
+ * The result is whether the document now carries the value, not whether this
+ * call wrote it: "already there" and "just written" are the same answer to every
+ * caller. A refusal resolves false instead of throwing, because the caller — keyed
+ * cache or not — is the only place that knows whether the value is worth retrying.
  * @param ctx - host context that may carry a settings service.
  * @returns a writer for a named field, or undefined when this host cannot write.
  */
-export declare function fieldWriterOf(ctx: Context): ((field: string, json: string) => Promise<void>) | undefined;
+export declare function fieldWriterOf(ctx: Context): ((field: string, json: string) => Promise<boolean>) | undefined;
 /**
  * Expose the host's current settings projection so the page can report why it
  * sees no form. Kept separate from {@link installHostSettings} so a host
