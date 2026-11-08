@@ -527,6 +527,37 @@ export function paramsOf(
 Run: `npm run typecheck`
 逐个处理报错。`src/adapter.ts` 里 `params === undefined` 的分支会变成死代码，删除它并直接使用 `params`。其它位置若只做 `params?.x` 的空安全访问，可以保留（合法但冗余），不影响类型检查。
 
+- [ ] **Step 4b: 更新断言「未知模型没有参数」的既有测试**
+
+`tests/adapter.spec.ts:609-614` 有这样一个用例：
+
+```ts
+  it('omits context and max tokens for a model newer than this build', async () => {
+    const resolved = await adapterWith().resolveModel('dsh-opendesign-go', 'unreleased-model')
+    expect(resolved.context).toBeUndefined()
+    expect(resolved.defaultMaxTokens).toBeUndefined()
+    expect(resolved.inputModalities).toBeUndefined()
+  })
+```
+
+它断言的行为与本任务相反 —— 这正是本次要改的：未知模型不再「什么都没有」，而是拿到通用默认值并且界面上会标注。把这个用例替换成：
+
+```ts
+  it('gives a model newer than this build generic parameters, not none', async () => {
+    // Returning nothing hid the model from the picker and dropped the reasoning
+    // selector. The values are estimates, which is why the settings page marks
+    // the row; withholding them made the model unusable instead.
+    const resolved = await adapterWith().resolveModel('dsh-opendesign-go', 'unreleased-model')
+    expect(resolved.context?.contextWindow).toBe(GENERIC_DEFAULTS.contextWindow)
+    expect(resolved.defaultMaxTokens).toBe(GENERIC_DEFAULTS.maxTokens)
+    expect(resolved.inputModalities).toEqual(GENERIC_DEFAULTS.inputModalities)
+  })
+```
+
+并在该文件的 import 里加上 `GENERIC_DEFAULTS`（从 `../src/model-params.ts`）。
+
+注意 `resolved.context` 是 `usableInputTokens` 折算后的输入预算，不是原始 `contextWindow`。若断言失败并显示两个不同数字，读 `src/adapter.ts` 里 `resolveModel` 计算 `context` 的那几行，用同样的折算方式写断言，不要改实现去迁就测试。
+
 - [ ] **Step 5: 跑测试，确认通过**
 
 Run: `npx vitest run tests/model-params.spec.ts tests/adapter.spec.ts`
