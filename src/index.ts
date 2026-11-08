@@ -23,7 +23,8 @@ import { Config, assertApiKeyEnv, assertBaseURL, readConfig } from './config.ts'
 import type { LiveConfig } from './config.ts'
 import { DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract.ts'
 import type { OpenDesignConfig } from './config-contract.ts'
-import { listSeedModels } from './catalog.ts'
+import { GO_DESIGN_PLAN_MODELS, listSeedModels } from './catalog.ts'
+import { fetchGatewayModels } from './catalog-fetch.ts'
 import { accountsOf, assertAccounts } from './accounts.ts'
 import { LedgerStore } from './ledger-store.ts'
 import { costOf, summarize } from './usage-ledger.ts'
@@ -177,9 +178,19 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       ctx.logger.warn(`llm-opendesign-go: updateJson is still not cached after ${attempts} attempts`)
     },
   })
+  const catalogRetry = createCacheRetry({
+    delays: CACHE_RETRY_MS,
+    onRetry: (delayMs, attempt) => {
+      ctx.logger.info(`llm-opendesign-go: retrying catalogJson in ${delayMs}ms (attempt ${attempt})`)
+    },
+    onGiveUp: (attempts) => {
+      ctx.logger.warn(`llm-opendesign-go: catalogJson is still not cached after ${attempts} attempts`)
+    },
+  })
   ctx.effect(() => () => {
     diagnosticsRetry.dispose()
     updateRetry.dispose()
+    catalogRetry.dispose()
   })
 
   // The quota channel is off until the user stores a console session reference:
@@ -308,6 +319,43 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     snapshot !== undefined && snapshot.error === undefined && snapshot.windows.length > 0
 
   void refreshIfConfigured()
+
+  /**
+   * Read which models this account may use and publish the answer.
+   *
+   * `GET {baseURL}/models` answers per entitlement, which is the only way a Plus
+   * or Pro subscriber sees the models their tier pays for without this plugin
+   * shipping a table per tier. A failed read falls back to the bundled Go list
+   * so the picker is never empty, and records why so the page can say it.
+   * @param ref - credential reference of the account to ask as.
+   */
+  const publishCatalog = async (ref: string): Promise<void> => {
+    const write = fieldWriterOf(ctx)
+    if (write === undefined) return
+    const baseURL = current().baseURL
+    const key = await resolveApiKey(ref).catch(() => undefined)
+    // No key means the route is not registered either; writing a fallback
+    // snapshot here would claim a catalog for a route that cannot serve it.
+    if (key === undefined) return
+    const ids = await fetchGatewayModels(baseURL, key)
+    const asOf = new Date().toISOString()
+    const payload = ids === undefined
+      ? {
+        asOf,
+        source: 'fallback',
+        ids: GO_DESIGN_PLAN_MODELS.map((model) => model.id),
+        error: '未能读取网关模型目录，正在显示内置的 Go 套餐列表',
+      }
+      : { asOf, source: 'gateway', ids }
+    ctx.logger.info(
+      `llm-opendesign-go: catalog ${payload.source} (${payload.ids.length} models)`,
+    )
+    const json = JSON.stringify(payload)
+    void catalogRetry.publish(
+      () => ({ fingerprint: json, json }),
+      (value) => write('catalogJson', value),
+    )
+  }
 
   // One registry read per start, and one more a minute later when the first
   // misses. Both sources are written whenever they answer, even when neither is
@@ -635,6 +683,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     const enabled = current().enabled
     if (configured && enabled && registration === undefined) {
       try {
+        void publishCatalog(triedRef.length > 0 ? triedRef : current().apiKeyEnv)
         registration = ctx.llm.registerAdapter([PROVIDER_ID], adapter)
         ctx.logger.info(`llm-opendesign-go: route "${PROVIDER_ID}" registered as ${DISPLAY_NAME}`)
         publishDiagnostics(configured, triedRef)
