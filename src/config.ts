@@ -92,6 +92,7 @@ export const PlainConfig: z<OpenDesignConfig> = z.object({
   recoveredProviders: z.string().default(''),
   refreshNonce: z.string().default(''),
   updateJson: z.string().default(''),
+  catalogJson: z.string().default(''),
   protocol: ProtocolSchema,
   baseURL: z.string().default(DEFAULT_BASE_URL),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS),
@@ -131,6 +132,7 @@ export const Config = z.object({
   recoveredProviders: z.string().default('').volatile(),
   refreshNonce: z.string().default('').volatile(),
   updateJson: z.string().default('').volatile(),
+  catalogJson: z.string().default('').volatile(),
   protocol: ProtocolSchema.volatile(),
   baseURL: z.string().default(DEFAULT_BASE_URL).volatile(),
   requestTimeoutMs: z.number().default(DEFAULT_REQUEST_TIMEOUT_MS).volatile(),
@@ -183,6 +185,8 @@ export interface LiveConfig {
   readonly refreshNonce: { get(): string }
   /** Newest published version, when newer than this build. */
   readonly updateJson: { get(): string }
+  /** Serialized catalog snapshot written by the startup read. */
+  readonly catalogJson: { get(): string }
   /** Inference surface: `chat` or `responses`. */
   readonly protocol: { get(): ProtocolId }
   /** Inference base URL, stored as configured. */
@@ -219,6 +223,7 @@ export function readConfig(config: LiveConfig): OpenDesignConfig {
     recoveredProviders: config.recoveredProviders.get(),
     refreshNonce: config.refreshNonce.get(),
     updateJson: config.updateJson.get(),
+    catalogJson: config.catalogJson.get(),
     enabledModels: parseEnabledModels(config.enabledModelsJson.get()),
     modelParams: parseModelParams(config.modelParamsJson.get()),
     protocol: config.protocol.get(),
