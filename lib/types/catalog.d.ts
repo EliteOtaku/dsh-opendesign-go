@@ -47,5 +47,49 @@ export declare function listSeedModels(provider: string): readonly {
     name: string;
     inputModalities?: readonly ModelModality[];
 }[];
+/** Where a catalog snapshot came from. */
+export type CatalogSource = 'gateway' | 'fallback';
+/** One reading of the models this account may use. */
+export interface CatalogSnapshot {
+    /** When the reading was taken, when the writer recorded it. */
+    readonly asOf: string | undefined;
+    /** Whether the ids came from the gateway or from the bundled list. */
+    readonly source: CatalogSource;
+    /** Model ids in display order. Empty is a real answer, not a missing one. */
+    readonly ids: readonly string[];
+    /** Why the bundled list was used, when it was. */
+    readonly error: string | undefined;
+}
+/**
+ * Human-readable name for a model id.
+ *
+ * The bundled table wins where it has an entry, because those names are spelled
+ * the way the vendor spells them and no derivation reproduces that. Everything
+ * else is derived, which is imprecise but legible and needs no maintenance when
+ * the gateway adds a model.
+ * @param id - model id from the catalog.
+ * @returns a display name.
+ */
+export declare function displayNameOf(id: string): string;
+/**
+ * Read the catalog snapshot from its serialized settings field.
+ *
+ * A malformed value reads as "no snapshot" rather than throwing: the field is
+ * written by a background read, and one bad character must not take the whole
+ * settings page down.
+ * @param raw - serialized snapshot, or undefined/empty when unset.
+ * @returns the snapshot, or undefined when absent or unusable.
+ */
+export declare function parseCatalog(raw: string | undefined): CatalogSnapshot | undefined;
+/**
+ * Project a snapshot into the rows every consumer renders.
+ *
+ * A missing snapshot means the read has not landed, so the bundled list stands
+ * in; an *empty* snapshot means the account grants nothing, and substituting the
+ * bundled list there would advertise models the account cannot call.
+ * @param snapshot - parsed snapshot, or undefined when none was ever written.
+ * @returns rows in display order.
+ */
+export declare function catalogRowsOf(snapshot: CatalogSnapshot | undefined): readonly CatalogModel[];
 /** Route this catalog belongs to. */
 export { PROVIDER_ID };

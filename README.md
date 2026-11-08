@@ -1,6 +1,6 @@
 # OpenDesign Go for DSH
 
-在 DSH 里使用 OpenDesign Go 订阅的 14 个模型：推理走 OpenAI 风格的 `chat/completions` 或 `responses`，额度、用量和多账号都在设置页里。
+在 DSH 里使用 OpenDesign 订阅的模型（Go 为 14 个，Plus / Pro / Max 更多）：推理走 OpenAI 风格的 `chat/completions` 或 `responses`，额度、用量和多账号都在设置页里。
 
 ![OpenDesign Go 设置页：启用开关、输入框额度开关与账号列表](docs/images/setup.png)
 
@@ -225,7 +225,7 @@ dsh plugin --profile web add dsh-opendesign-go@latest
 
 ## 模型
 
-Go 套餐授予 14 个 Design Plan 模型。默认参数取自各厂商文档，可在设置页逐项覆盖。
+模型列表来自网关的 `GET {baseURL}/models`，该端点按账号额度等级返回：Go 拿到 14 个 Design Plan 模型，Plus / Pro / Max 拿到各自档位的额外模型。默认参数取自各厂商文档，可在设置页逐项覆盖；插件未收录的新模型使用通用默认值并标注「参数未收录」。
 
 | 模型 | ID | 上下文 | 输出上限 | 图片输入 |
 | --- | --- | --- | --- | --- |

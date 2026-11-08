@@ -1,8 +1,8 @@
 # 模型与参数
 
-模型目录是代码内的静态表（`src/catalog.ts` 的 `GO_DESIGN_PLAN_MODELS`），共 14 个，对应 Go 套餐授予的 Design Plan 模型。参数默认值在 `src/model-params.ts` 的 `MODEL_DEFAULTS`。
+模型目录来自网关：启动时用当前账号的 API key 请求 `GET {baseURL}/models`，该端点**按账号额度等级返回**，插件照单展示。Go 拿到 14 个 Design Plan 模型，Plus / Pro / Max 拿到各自档位的额外模型。参数默认值在 `src/model-params.ts` 的 `MODEL_DEFAULTS`；未收录的 id 用 `GENERIC_DEFAULTS`，并在设置页标注「参数未收录」。
 
-目录不来自线上接口：Go 套餐不包含套餐模型额度，可授予的集合是固定的，静态表省掉一次启动期网络依赖。
+`src/catalog.ts` 的 `GO_DESIGN_PLAN_MODELS` 保留为兜底：拉取失败时（离线、网关故障、key 无效）用它顶上，页面不会空掉。它也是显示名的权威来源 —— 网关只返回 id，没有显示名。
 
 ## 模型表
 
@@ -152,7 +152,7 @@
 
 代价是这张表**绑定了当前网关**。如果哪天 OpenDesign 把 `thinking` 接通、或让 `none` 不再关思考，插件里「关闭」这一档的语义就会变，需要重新探针。
 
-未知模型 ID（不在静态表里的）同样会拿到思考等级列表，因为网关对它服务的每个模型都接受这个参数；隐藏选择器反而会让比本版本更新的 ID 少一个能力。
+不在目录里的模型 ID 同样会拿到思考等级列表和通用参数（`GENERIC_DEFAULTS`），因为网关对它服务的每个模型都接受这个参数；隐藏选择器反而会让比本版本更新的 ID 少一个能力。设置页会把这些值标成「参数未收录」，提醒用户核对。
 
 ## 图片输入
 

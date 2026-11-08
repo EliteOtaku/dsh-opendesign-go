@@ -16,7 +16,7 @@ export declare const DISPLAY_NAME = "OpenDesign Go";
  * a single file with no reliable path back to its own package, and the update
  * check needs a value it can compare without filesystem access.
  */
-export declare const PLUGIN_VERSION = "0.1.17";
+export declare const PLUGIN_VERSION = "0.1.18";
 /** Settings namespace this plugin installs and the Web page edits. */
 export declare const SETTINGS_NAMESPACE = "llm-opendesign-go";
 /**
@@ -187,6 +187,15 @@ export interface OpenDesignConfig {
      * error for a failed background check would be noise in a settings page.
      */
     readonly updateJson: string;
+    /**
+     * The models this account may use, as a serialized snapshot.
+     *
+     * Written by the startup read against `GET {baseURL}/models`, which answers
+     * per entitlement. Empty means the read has not landed yet, and consumers fall
+     * back to the bundled list; an empty `ids` *inside* a snapshot means the
+     * account genuinely grants nothing.
+     */
+    readonly catalogJson: string;
     /** Parsed enabled-model list, filled by `readConfig`; empty means all. */
     readonly enabledModels?: readonly string[];
     /** Parsed override table, filled by `readConfig`. */

@@ -15,6 +15,7 @@ import {
 import type { ContentBlock, GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { OpenDesignAdapter } from '../src/adapter.ts'
 import { toChatMessages, toChatTools } from '../src/conversion.ts'
+import { GENERIC_DEFAULTS } from '../src/model-params.ts'
 import type { OpenDesignConfig } from '../src/config-contract.ts'
 
 const CONFIG: OpenDesignConfig = {
@@ -606,11 +607,14 @@ describe('OpenDesignAdapter.resolveModel', () => {
     }
   })
 
-  it('omits context and max tokens for a model newer than this build', async () => {
+  it('gives a model newer than this build generic parameters, not none', async () => {
+    // Returning nothing hid the model from the picker and dropped the reasoning
+    // selector. The values are estimates, which is why the settings page marks
+    // the row; withholding them made the model unusable instead.
     const resolved = await adapterWith().resolveModel('dsh-opendesign-go', 'unreleased-model')
-    expect(resolved.context).toBeUndefined()
-    expect(resolved.defaultMaxTokens).toBeUndefined()
-    expect(resolved.inputModalities).toBeUndefined()
+    expect(resolved.defaultMaxTokens).toBe(GENERIC_DEFAULTS.maxTokens)
+    expect(resolved.inputModalities).toEqual(GENERIC_DEFAULTS.inputModalities)
+    expect(resolved.reasoning?.efforts.length).toBeGreaterThan(0)
   })
 
   it('reports the input budget, not the advertised window', async () => {

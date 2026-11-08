@@ -233,11 +233,21 @@ export class OpenDesignAdapter extends LlmAdapter {
     // on others.
     const reasoning = reasoningFor(params)
     if (row === undefined) {
-      // An unknown id keeps the full list: the id is newer than this build and
-      // its accepted set is unknown, so hiding levels would be the worse error.
-      // `paramsOf` answers with `GENERIC_DEFAULTS` here, whose effort list is the
-      // full range, so `reasoning` is already that list.
-      return { provider, id: model, name: model, reasoning }
+      // A model the catalog does not carry still resolves to itself: routing
+      // accepts ids outside the snapshot, and the id may simply be newer than
+      // the last catalog read. Its parameters are the generic estimates from
+      // `paramsOf`, which is what the settings page marks as unverified — the
+      // alternative was reporting nothing, which hid the model from the picker
+      // and dropped the reasoning selector entirely.
+      return {
+        provider,
+        id: model,
+        name: model,
+        inputModalities: params.inputModalities,
+        context: { contextWindow: usableInputTokens(params.contextWindow, params.maxTokens) },
+        defaultMaxTokens: reservedOutputTokens(params.contextWindow, params.maxTokens),
+        reasoning,
+      }
     }
     return {
       provider,

@@ -123,6 +123,10 @@ export interface LiveConfig {
     readonly updateJson: {
         get(): string;
     };
+    /** Serialized catalog snapshot written by the startup read. */
+    readonly catalogJson: {
+        get(): string;
+    };
     /** Inference surface: `chat` or `responses`. */
     readonly protocol: {
         get(): ProtocolId;
