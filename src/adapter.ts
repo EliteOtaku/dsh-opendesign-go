@@ -213,16 +213,14 @@ export class OpenDesignAdapter extends LlmAdapter {
       // declaring no input modality — and the host's image tool refuses to read
       // an image unless the resolved route names `image` explicitly, which made
       // "this model cannot see images" the reported symptom of a table mismatch.
-      ...(params === undefined ? {} : {
-        inputModalities: params.inputModalities,
-        // The harness compares conversation size against this number and never
-        // subtracts the output reservation, so it is told what input may fill.
-        // Reporting the advertised window here made every compaction decision
-        // late by the reservation, and a conversation at 60% of the window was
-        // still refused by the provider as too long.
-        context: { contextWindow: usableInputTokens(params.contextWindow, params.maxTokens) },
-        defaultMaxTokens: reservedOutputTokens(params.contextWindow, params.maxTokens),
-      }),
+      inputModalities: params.inputModalities,
+      // The harness compares conversation size against this number and never
+      // subtracts the output reservation, so it is told what input may fill.
+      // Reporting the advertised window here made every compaction decision
+      // late by the reservation, and a conversation at 60% of the window was
+      // still refused by the provider as too long.
+      context: { contextWindow: usableInputTokens(params.contextWindow, params.maxTokens) },
+      defaultMaxTokens: reservedOutputTokens(params.contextWindow, params.maxTokens),
       reasoning,
     }
   }
@@ -247,7 +245,7 @@ export class OpenDesignAdapter extends LlmAdapter {
     const resolve = this.#options.imageDataUrl
     if (resolve === undefined) return undefined
     const params = paramsOf(model, this.#options.config().modelParams)
-    if (params === undefined || !params.inputModalities.includes('image')) return undefined
+    if (!params.inputModalities.includes('image')) return undefined
     return resolve
   }
 
@@ -380,17 +378,13 @@ function chatBody(
   // because leaving the field out lets the provider pick an output size that
   // overflows the window it just measured the input against.
   const params = paramsOf(options.model, config.modelParams)
-  const requested = options.maxTokens ?? params?.maxTokens
-  if (requested !== undefined) {
-    // The provider checks input + max_tokens against the window before running
-    // anything, so a large advertised output cap refuses otherwise-valid input.
-    // The reservation is clamped to what is actually left, which is the only way
-    // both "use the model's real output budget" and "accept a long prompt" hold.
-    const fitted = params === undefined
-      ? requested
-      : fitMaxTokens(requested, params.contextWindow, estimatePromptTokens(body.messages as unknown[], tools))
-    if (fitted !== undefined) body.max_tokens = fitted
-  }
+  const requested = options.maxTokens ?? params.maxTokens
+  // The provider checks input + max_tokens against the window before running
+  // anything, so a large advertised output cap refuses otherwise-valid input.
+  // The reservation is clamped to what is actually left, which is the only way
+  // both "use the model's real output budget" and "accept a long prompt" hold.
+  const fitted = fitMaxTokens(requested, params.contextWindow, estimatePromptTokens(body.messages as unknown[], tools))
+  if (fitted !== undefined) body.max_tokens = fitted
   // The gateway honours `reasoning_effort`: the four values change
   // `reasoning_tokens` in the response rather than being ignored.
   if (options.reasoningEffort !== undefined) body.reasoning_effort = options.reasoningEffort
@@ -425,13 +419,9 @@ function chatBodyForResponses(
   }
   if (options.temperature !== undefined) body.temperature = options.temperature
   const params = paramsOf(options.model, config.modelParams)
-  const requested = options.maxTokens ?? params?.maxTokens
-  if (requested !== undefined) {
-    const fitted = params === undefined
-      ? requested
-      : fitMaxTokens(requested, params.contextWindow, estimatePromptTokens(projected.input, projected.tools))
-    if (fitted !== undefined) body.max_output_tokens = fitted
-  }
+  const requested = options.maxTokens ?? params.maxTokens
+  const fitted = fitMaxTokens(requested, params.contextWindow, estimatePromptTokens(projected.input, projected.tools))
+  if (fitted !== undefined) body.max_output_tokens = fitted
   if (options.reasoningEffort !== undefined) body.reasoning = { effort: options.reasoningEffort }
   if (options.stop !== undefined && options.stop.length > 0) body.stop = options.stop
   return body

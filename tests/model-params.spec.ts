@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_REASONING_EFFORT,
+  GENERIC_DEFAULTS,
   MAX_CONTEXT_WINDOW,
   MAX_MAX_TOKENS,
   isModelEnabled,
@@ -162,13 +163,37 @@ describe('paramsOf', () => {
     expect(paramsOf('deepseek-v4.1-flash', { 'deepseek-v4.1-flash': { maxTokens: Number.NaN } })?.maxTokens).toBe(384_000)
   })
 
-  it('returns undefined for an unknown model rather than inventing a window', () => {
-    expect(paramsOf('not-a-model', {})).toBeUndefined()
+  it('returns generic defaults for an unknown model instead of nothing', () => {
+    // The gateway is the authority on which ids are callable, and it lists ids
+    // this build has no vendor numbers for. Withholding metadata for them hid the
+    // model from the picker, so an unknown id now gets the generic set — the row
+    // is marked as guessed in the settings page.
+    expect(paramsOf('not-a-model', {})).toEqual(GENERIC_DEFAULTS)
   })
 
   it('exposes the documented bounds', () => {
     expect(MIN_CONTEXT_WINDOW).toBeLessThan(MAX_CONTEXT_WINDOW)
     expect(MAX_MAX_TOKENS).toBeGreaterThan(MIN_MAX_TOKENS)
+  })
+})
+
+describe('paramsOf for a model the table does not carry', () => {
+  it('returns the generic defaults instead of undefined', () => {
+    // New ids arrive from the gateway before any vendor documentation reaches
+    // this table. Returning undefined hid every parameter for them, so the
+    // picker showed no context window and no reasoning selector at all.
+    const params = paramsOf('claude-sonnet-5.5', undefined)
+    expect(params).toEqual(GENERIC_DEFAULTS)
+  })
+
+  it('still applies overrides on top of the generic defaults', () => {
+    const params = paramsOf('claude-sonnet-5.5', { 'claude-sonnet-5.5': { maxTokens: 64_000 } })
+    expect(params?.maxTokens).toBe(64_000)
+    expect(params?.contextWindow).toBe(GENERIC_DEFAULTS.contextWindow)
+  })
+
+  it('leaves a documented model on its own numbers', () => {
+    expect(paramsOf('deepseek-v4.1-flash', undefined)).toBe(MODEL_DEFAULTS['deepseek-v4.1-flash'])
   })
 })
 

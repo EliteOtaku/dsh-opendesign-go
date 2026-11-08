@@ -114,6 +114,28 @@ export const MODEL_DEFAULTS: Readonly<Record<string, ModelParams>> = {
   'minimax-m3.1-flash': { contextWindow: 1_000_000, maxTokens: 524_288, inputModalities: ['text', 'image'], reasoningEfforts: ['minimal','low','medium','high','xhigh','max'] },
 }
 
+/**
+ * Parameters for a model this build has no documented numbers for.
+ *
+ * The gateway already grants the model, so it is callable; withholding the
+ * metadata hid it from the picker and dropped the reasoning selector. These are
+ * deliberately conservative and deliberately visible: the model row says the
+ * numbers are generic, because a wrong context window changes truncation
+ * behaviour and a wrong output cap changes `max_tokens`.
+ *
+ * The reasoning list is the full range for the same reason as an unknown id in
+ * `resolveModel`: this build cannot know which values the model refuses, and
+ * hiding levels is the worse error.
+ */
+export const GENERIC_DEFAULTS: ModelParams = Object.freeze({
+  contextWindow: 1_000_000,
+  maxTokens: 128_000,
+  inputModalities: Object.freeze(['text', 'image'] as const) as readonly ModelModality[],
+  reasoningEfforts: Object.freeze([
+    'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra', 'max',
+  ] as const) as readonly ReasoningEffortName[],
+})
+
 export const MIN_CONTEXT_WINDOW = 1_000
 export const MAX_CONTEXT_WINDOW = 10_000_000
 export const MIN_MAX_TOKENS = 1
@@ -158,14 +180,17 @@ export function parseModelParams(raw: string | undefined): Record<string, ModelP
  * succeed, and the page has no way to tell "disabled" from "mistyped".
  * @param model - exact model id.
  * @param overrides - per-model overrides from configuration.
- * @returns the effective parameters, or undefined for an unknown model.
+ * @returns the effective parameters; an id the table does not carry gets
+ * {@link GENERIC_DEFAULTS}, because the gateway granted it and it is callable.
  */
 export function paramsOf(
   model: string,
   overrides: Readonly<Record<string, ModelParamOverride>> | undefined,
-): ModelParams | undefined {
-  const base = MODEL_DEFAULTS[model]
-  if (base === undefined) return undefined
+): ModelParams {
+  // An id the table does not carry still gets numbers: the gateway granted it,
+  // so it is callable, and returning undefined here hid every parameter from the
+  // picker instead of flagging them as estimates.
+  const base = MODEL_DEFAULTS[model] ?? GENERIC_DEFAULTS
   const override = overrides?.[model]
   if (override === undefined) return base
   return {
