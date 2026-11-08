@@ -105,3 +105,23 @@
   font-size: 12px;
   color: var(--ods-text-2);
 }
+
+/* Marks a row whose numbers this build guessed. Deliberately a filled badge
+   rather than muted text: a wrong context window changes truncation, so the row
+   has to look different from one backed by documentation. */
+.generic {
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--ods-warn) 50%, transparent);
+  background: color-mix(in srgb, var(--ods-warn) 12%, transparent);
+  font-size: 11px;
+  color: var(--ods-warn);
+  white-space: nowrap;
+}
+
+.hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ods-text-3);
+}

@@ -36,9 +36,9 @@ import type {
   StreamChunk,
   TokenUsage,
 } from '@deepseek-ai/dsh-llm'
-import { listSeedModels, seedModel } from './catalog.ts'
+import { catalogRowsOf, parseCatalog } from './catalog.ts'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS, paramsOf } from './model-params.ts'
-import type { ModelParams } from './model-params.ts'
+import type { ModelParamOverride, ModelParams } from './model-params.ts'
 import { estimatePromptTokens, fitMaxTokens, reservedOutputTokens, usableInputTokens } from './output-budget.ts'
 import { DISPLAY_NAME, type OpenDesignConfig, type ProtocolId } from './config-contract.ts'
 import { toChatMessages, toChatTools } from './conversion.ts'
@@ -109,19 +109,47 @@ export interface OpenDesignAdapterOptions {
 }
 
 /**
- * Build a model's effort list, defaulting to the full set when it is unknown.
+ * Project one catalog row into the harness model vocabulary for a route.
+ *
+ * Modalities come from `paramsOf`, never from the catalog row: the row carries
+ * only an id and a name, so reading modalities from it left every model
+ * declaring none — and the host's image tool refuses to read an image unless the
+ * resolved route names `image` explicitly.
+ * @param provider - route that owns the model.
+ * @param row - catalog row.
+ * @param overrides - user parameter overrides, if any.
+ * @returns discoverable model info.
+ */
+function projectRow(
+  provider: string,
+  row: { readonly id: string, readonly name: string },
+  overrides: Readonly<Record<string, ModelParamOverride>> | undefined,
+): LlmModelInfo {
+  const params = paramsOf(row.id, overrides)
+  return {
+    provider,
+    id: row.id,
+    name: row.name,
+    inputModalities: params.inputModalities,
+  }
+}
+
+/**
+ * Offer only the reasoning efforts this model takes.
+ *
+ * The gateway rejects a value its neighbour accepts — GLM answers 400 outside
+ * low/high/max, and Kimi stops at `xhigh` — so a shared list both errored on
+ * some models and hid the top level on others.
  *
  * The default effort is clamped into the offered list: leaving it at `medium`
  * for a model that only takes low/high/max would preselect a value the gateway
  * then rejects on the first request.
- * @param params - resolved parameters, or undefined for an unknown model id.
+ * @param params - resolved parameters.
  * @returns the efforts to advertise and the one to preselect.
  */
-function reasoningFor(params: ModelParams | undefined): { efforts: { id: ReasoningEffortId, name: string }[], defaultEffort: ReasoningEffortId } {
-  const allowed = params?.reasoningEfforts
-  const efforts = (allowed === undefined
-    ? REASONING_EFFORTS.map((effort) => effort.id)
-    : REASONING_EFFORTS.filter((effort) => allowed.includes(effort.id)).map((effort) => effort.id))
+function reasoningFor(params: ModelParams): { efforts: { id: ReasoningEffortId, name: string }[], defaultEffort: ReasoningEffortId } {
+  const allowed = params.reasoningEfforts
+  const efforts = REASONING_EFFORTS.filter((effort) => allowed.includes(effort.id)).map((effort) => effort.id)
   const offered = efforts.length === 0 ? REASONING_EFFORTS.map((effort) => effort.id) : efforts
   const fallback = offered.includes(DEFAULT_REASONING_EFFORT) ? DEFAULT_REASONING_EFFORT : offered[0]!
   return {
@@ -170,10 +198,14 @@ export class OpenDesignAdapter extends LlmAdapter {
    * @returns the enabled rows, in display order.
    */
   async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
-    const enabled = this.#options.config().enabledModels ?? []
-    const rows = listSeedModels(provider)
-    if (enabled.length === 0) return rows
-    return rows.filter((row) => enabled.includes(row.id))
+    const config = this.#options.config()
+    // The catalog is whatever the gateway granted this account, so a Plus or Pro
+    // subscriber sees the models their tier pays for without this build shipping
+    // a table per tier. An unwritten snapshot falls back to the bundled Go list.
+    const rows = catalogRowsOf(parseCatalog(config.catalogJson))
+    const enabled = config.enabledModels ?? []
+    const visible = enabled.length === 0 ? rows : rows.filter((row) => enabled.includes(row.id))
+    return visible.map((row) => projectRow(provider, row, config.modelParams))
   }
 
   /**
@@ -192,8 +224,9 @@ export class OpenDesignAdapter extends LlmAdapter {
    * @returns provider/model identity plus resolved parameters.
    */
   async resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
-    const row = seedModel(model)
-    const params = paramsOf(model, this.#options.config().modelParams)
+    const config = this.#options.config()
+    const row = catalogRowsOf(parseCatalog(config.catalogJson)).find((entry) => entry.id === model)
+    const params = paramsOf(model, config.modelParams)
     // Offer only what this model takes. The gateway rejects a value its
     // neighbour accepts — GLM answers 400 outside low/high/max, and Kimi stops at
     // xhigh — so a shared list both errored on some models and hid the top level
@@ -202,7 +235,9 @@ export class OpenDesignAdapter extends LlmAdapter {
     if (row === undefined) {
       // An unknown id keeps the full list: the id is newer than this build and
       // its accepted set is unknown, so hiding levels would be the worse error.
-      return { provider, id: model, name: model, reasoning: reasoningFor(undefined) }
+      // `paramsOf` answers with `GENERIC_DEFAULTS` here, whose effort list is the
+      // full range, so `reasoning` is already that list.
+      return { provider, id: model, name: model, reasoning }
     }
     return {
       provider,

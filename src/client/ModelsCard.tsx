@@ -16,9 +16,10 @@
 import { useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
+import { catalogRowsOf, parseCatalog } from '../catalog.ts'
 import type { OpenDesignConfig } from '../config-contract.ts'
 import {
+  GENERIC_DEFAULTS,
   MAX_CONTEXT_WINDOW,
   MAX_MAX_TOKENS,
   MIN_CONTEXT_WINDOW,
@@ -53,6 +54,11 @@ export function ModelsCard({ form, config, editable }: {
     () => parseModelParams(config?.modelParamsJson),
     [config?.modelParamsJson],
   )
+  // The catalog is what the gateway granted this account, so a Plus or Pro
+  // subscriber sees their tier's models. An unwritten snapshot falls back to the
+  // bundled Go list, which is also what a first start shows before the read lands.
+  const catalog = useMemo(() => parseCatalog(config?.catalogJson), [config?.catalogJson])
+  const rows = useMemo(() => catalogRowsOf(catalog), [catalog])
   const stored = useMemo(() => parseEnabledModels(config?.enabledModelsJson), [config?.enabledModelsJson])
   // Overlay shown while a write is in flight.
   //
@@ -79,14 +85,14 @@ export function ModelsCard({ form, config, editable }: {
     setError(undefined)
     setNotice(undefined)
     const current = enabled.length === 0
-      ? GO_DESIGN_PLAN_MODELS.map((row) => row.id)
+      ? rows.map((row) => row.id)
       : [...enabled]
     const next = current.includes(model)
       ? current.filter((id) => id !== model)
       : [...current, model]
     // Writing the full catalog back means "all enabled" again; store empty so a
     // future model added to the seed is picked up without re-saving.
-    const allOn = next.length === GO_DESIGN_PLAN_MODELS.length
+    const allOn = next.length === rows.length
     // Paint first: a checkbox that stays still while the write is in flight
     // reads as a broken control even when the write succeeds.
     setPending(next)
@@ -151,7 +157,7 @@ export function ModelsCard({ form, config, editable }: {
   return (
     <Card
       title="可用模型"
-      actions={<span className={styles.cap}>{GO_DESIGN_PLAN_MODELS.length} 个</span>}
+      actions={<span className={styles.cap}>{rows.length} 个</span>}
       description={(
         <>
           <span>
@@ -165,11 +171,18 @@ export function ModelsCard({ form, config, editable }: {
       )}
     >
       <div className={styles.list}>
-        {GO_DESIGN_PLAN_MODELS.map((model) => {
+        {rows.map((model) => {
           const base = MODEL_DEFAULTS[model.id]
+          // A model the gateway grants but this build has no documentation for:
+          // its numbers below are estimates, and the row says so.
+          const undocumented = base === undefined
+          // Shown numbers follow the same fallback the request path uses, so the
+          // page cannot claim "unknown" for a model that is actually callable
+          // with the generic defaults.
+          const effective = base ?? GENERIC_DEFAULTS
           const override = overrides[model.id]
-          const context = override?.contextWindow ?? base?.contextWindow
-          const max = override?.maxTokens ?? base?.maxTokens
+          const context = override?.contextWindow ?? effective.contextWindow
+          const max = override?.maxTokens ?? effective.maxTokens
           const isEditing = editing === model.id
           const on = isModelEnabled(model.id, enabled)
           return (
@@ -188,6 +201,7 @@ export function ModelsCard({ form, config, editable }: {
                     {context !== undefined && max !== undefined ? `（可用输入 ${tokens(usableInputTokens(context, max))}）` : ''}
                     {' · '}输出 {max === undefined ? '未知' : tokens(max)}
                     {override !== undefined && <span className={styles.edited}>（已改）</span>}
+                    {undocumented && <span className={styles.generic}>参数未收录</span>}
                   </span>
                   <Button
                     disabled={!editable}
@@ -200,8 +214,8 @@ export function ModelsCard({ form, config, editable }: {
                       // actually in use; leaving the fallback in the
                       // placeholder made an empty box look like "unset" even
                       // when a default applied.
-                      setDraftContext(String(override?.contextWindow ?? base?.contextWindow ?? ''))
-                      setDraftMax(String(override?.maxTokens ?? base?.maxTokens ?? ''))
+                      setDraftContext(String(override?.contextWindow ?? effective.contextWindow))
+                      setDraftMax(String(override?.maxTokens ?? effective.maxTokens))
                       setError(undefined)
                       setNotice(undefined)
                       setEditing(model.id)
@@ -212,6 +226,12 @@ export function ModelsCard({ form, config, editable }: {
                 </div>
               </div>
 
+              {undocumented && (
+                <p className={styles.hint}>
+                  插件未收录该模型的官方规格，上面是通用默认值（上下文 1M、输出 128K、全部思考档位）。
+                  请按厂商文档核对后点「改参数」修改；改过的值不再显示此提示。
+                </p>
+              )}
               {isEditing && (
                 <div className={styles.editor}>
                   <div className={styles.editorRow}>
@@ -219,7 +239,7 @@ export function ModelsCard({ form, config, editable }: {
                       <Input
                         type="number"
                         value={draftContext}
-                        placeholder={base?.contextWindow === undefined ? '' : String(base.contextWindow)}
+                        placeholder={String(effective.contextWindow)}
                         onChange={setDraftContext}
                       />
                     </Field>
@@ -227,7 +247,7 @@ export function ModelsCard({ form, config, editable }: {
                       <Input
                         type="number"
                         value={draftMax}
-                        placeholder={base?.maxTokens === undefined ? '' : String(base.maxTokens)}
+                        placeholder={String(effective.maxTokens)}
                         onChange={setDraftMax}
                       />
                     </Field>
