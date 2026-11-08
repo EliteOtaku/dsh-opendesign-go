@@ -98,6 +98,61 @@
   color: var(--ods-text-2);
 }
 
+/* Always-on version line. Three states share one layout so the page does not
+   jump when a check turns up an update. */
+.versionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--ods-radius-sm);
+  border: 1px solid var(--ods-border);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ods-text-2);
+}
+
+.versionBarAlert {
+  border-color: color-mix(in srgb, var(--ods-warn) 45%, transparent);
+  background: color-mix(in srgb, var(--ods-warn) 9%, transparent);
+}
+
+.versionBarQuiet {
+  opacity: 0.8;
+}
+
+.versionNumber {
+  font-variant-numeric: tabular-nums;
+  color: var(--ods-text);
+}
+
+.versionState {
+  font-weight: 600;
+  color: var(--ods-text);
+}
+
+.versionActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 4px;
+}
+
+.versionFoot {
+  width: 100%;
+  font-size: 11px;
+  color: var(--ods-text-3);
+}
+
+/* The remote numbers were read more than a day ago, which cannot happen when
+   the cache write lands — so they describe an earlier start, not now. */
+.versionFootWarn {
+  width: 100%;
+  font-size: 11px;
+  color: var(--ods-warn);
+}
+
 .footer {
   display: flex;
   flex-wrap: wrap;

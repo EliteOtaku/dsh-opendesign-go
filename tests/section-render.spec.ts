@@ -13,7 +13,32 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { OpenDesignSection } from '../src/client/Section.tsx'
 import type { OpenDesignConfig } from '../src/config-contract.ts'
+import { PLUGIN_VERSION } from '../src/config-contract.ts'
 import type { ConfigForm } from '../src/client/form.ts'
+
+/**
+ * This build's version.
+ *
+ * The snapshot parser treats a field whose `current` is not this build as old
+ * and drops its remote numbers, so the fixtures have to name the running build
+ * rather than a literal: a hard-coded number would turn every case into the
+ * "written by another build" one on the next version bump.
+ */
+const CURRENT = PLUGIN_VERSION
+
+/** The next patch after {@link CURRENT}, used as "a newer version". */
+const NEWER = (() => {
+  const parts = CURRENT.split('.')
+  const last = Number.parseInt(parts[parts.length - 1] ?? '0', 10)
+  return [...parts.slice(0, -1), String(last + 1)].join('.')
+})()
+
+/** The patch before {@link CURRENT}, used as "a source that trails this build". */
+const OLDER = (() => {
+  const parts = CURRENT.split('.')
+  const last = Number.parseInt(parts[parts.length - 1] ?? '1', 10)
+  return [...parts.slice(0, -1), String(Math.max(0, last - 1))].join('.')
+})()
 
 /**
  * A form stuck on one snapshot.
@@ -77,11 +102,11 @@ function render(value: OpenDesignConfig, overrides: { status?: string, writable?
   }))
 }
 
-/** A configuration whose notice names one or both newer versions. */
-function withNotice(notice: { latest?: string, githubLatest?: string }): OpenDesignConfig {
+/** A configuration carrying a version snapshot. */
+function withSnapshot(snapshot: Record<string, unknown>): OpenDesignConfig {
   return {
     ...BASE,
-    updateJson: JSON.stringify({ current: '0.1.13', ...notice }),
+    updateJson: JSON.stringify({ current: CURRENT, ...snapshot }),
   } as unknown as OpenDesignConfig
 }
 
@@ -141,21 +166,36 @@ describe('settings section', () => {
     expect(html).toMatch(/Chat Completions/)
   })
 
-  it('draws the update card only for the routes that have something to install', () => {
-    // The registry answered but the repository tag did not: only the npm button
-    // may appear, because a GitHub button would have no version to name.
-    const npmOnly = render(withNotice({ latest: '0.1.14' }))
-    expect(npmOnly).toContain('一键更新')
-    expect(npmOnly).not.toContain('从 GitHub 装')
+  it('shows the version line even when there is nothing to install', () => {
+    const html = render(withSnapshot({ npm: OLDER, github: CURRENT, checkedAt: new Date().toISOString() }))
+    expect(html).toContain(`本机 ${CURRENT}`)
+    expect(html).toContain(`GitHub v${CURRENT}`)
+    expect(html).toContain(`npm ${OLDER}`)
+    expect(html).toContain('已是最新')
+    expect(html).not.toContain('一键更新')
+    expect(html).not.toContain('从 GitHub 装')
+  })
 
-    // The reverse: a tag exists before the registry publish lands.
-    const githubOnly = render(withNotice({ githubLatest: '0.1.14' }))
+  it('offers only the route that actually has a newer version', () => {
+    // The registry answered without an update, the tag did: a GitHub button and
+    // no npm button, because there is nothing for npm to install.
+    const githubOnly = render(withSnapshot({ npm: CURRENT, github: NEWER }))
+    expect(githubOnly).toContain('有新版本')
     expect(githubOnly).toContain('从 GitHub 装')
     expect(githubOnly).not.toContain('一键更新')
 
-    const neither = render(BASE)
-    expect(neither).not.toContain('一键更新')
-    expect(neither).not.toContain('从 GitHub 装')
+    const npmOnly = render(withSnapshot({ npm: NEWER, github: CURRENT }))
+    expect(npmOnly).toContain('一键更新')
+    expect(npmOnly).not.toContain('从 GitHub 装')
+  })
+
+  it('says it could not check rather than claiming to be current', () => {
+    // Both sources absent is the "did not answer" state; calling that "已是最新"
+    // would be a silent lie, and the user would stop looking for updates.
+    const html = render(withSnapshot({}))
+    expect(html).toContain('无法检查更新')
+    expect(html).toContain('npm 未知')
+    expect(html).toContain('GitHub 未知')
   })
 
   it('shows the model count this build carries, not a stale cached one', () => {

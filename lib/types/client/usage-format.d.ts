@@ -83,3 +83,14 @@ export declare function daysToExhaust(window: {
     readonly resetsAt: string;
     readonly durationSeconds: number;
 }, now?: number): number | undefined;
+/**
+ * Describe how long ago a timestamp was.
+ *
+ * The version line is always on screen, so it has to say when its remote
+ * numbers were read: a refused cache write leaves the previous start's numbers
+ * in place, and without a time they read as current.
+ * @param iso - timestamp, or undefined when the snapshot carried none.
+ * @param now - current time in epoch milliseconds, injectable for tests.
+ * @returns a short phrase such as `3 分钟前`, or undefined for unreadable input.
+ */
+export declare function relativeTime(iso: string | undefined, now?: number): string | undefined;

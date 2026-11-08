@@ -25,7 +25,8 @@ import { GO_DESIGN_PLAN_MODELS } from '../catalog.ts'
 import { QuotaCard } from './QuotaCard.tsx'
 import { BillingCard } from './BillingCard.tsx'
 import { parseBaseline, parsePlanOverrides, planOf } from '../plans.ts'
-import { parseUpdate } from '../update-check.ts'
+import { parseVersionLine, versionStateOf } from '../update-check.ts'
+import { relativeTime } from './usage-format.ts'
 import { explainRouteProblem, modelCountOf } from './route-explanation.ts'
 import { UsageCard } from './UsageCard.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
@@ -92,10 +93,19 @@ export function OpenDesignSection({
     [usage?.tier, value?.planOverrides],
   )
   const baseline = useMemo(() => parseBaseline(value?.alignBaselineJson), [value?.alignBaselineJson])
-  // Published release newer than this build, filled by the startup check. Absent
-  // means either up to date or the registry was unreachable; both read the same
-  // way to a user, so no banner appears.
-  const update = useMemo(() => parseUpdate(value?.updateJson), [value?.updateJson])
+  // Version snapshot written by the startup check. An empty field means the
+  // check has not run or its write was refused, and that reads as "unknown" —
+  // never as "up to date". Telling those apart is the point of this line.
+  const versionLine = useMemo(() => parseVersionLine(value?.updateJson), [value?.updateJson])
+  const versionState = versionStateOf(versionLine)
+  const checkedAt = versionLine.checkedAt === undefined ? undefined : Date.parse(versionLine.checkedAt)
+  const checkedAgo = relativeTime(versionLine.checkedAt)
+  // The check runs on every start, so a snapshot older than a day means the
+  // write has not landed since: the numbers describe an earlier start, and the
+  // line says so in a colour rather than leaving the reader to do the date math.
+  const checkedStale = checkedAt !== undefined
+    && Number.isFinite(checkedAt)
+    && Date.now() - checkedAt > 86_400_000
   // Explains an empty model picker where the status line alone was not enough:
   // "未注册" states the symptom, not the cause or the fix.
   const routeProblem = useMemo(() => explainRouteProblem(routeState), [routeState])
@@ -230,6 +240,58 @@ export function OpenDesignSection({
         <h1 className={styles.title}>OpenDesign Go</h1>
         <p className={styles.subtitle}>选择会话中显示的 OpenDesign Go 模型，并调整其设置。</p>
       </header>
+
+      <div className={cx(
+        styles.versionBar,
+        versionState === 'outdated' && styles.versionBarAlert,
+        versionState === 'unknown' && styles.versionBarQuiet,
+      )}>
+        <span className={styles.versionNumber}>本机 {versionLine.current}</span>
+        <span className={styles.footerSep}>·</span>
+        <span>GitHub {versionLine.github === undefined ? '未知' : `v${versionLine.github}`}</span>
+        <span className={styles.footerSep}>·</span>
+        <span>npm {versionLine.npm ?? '未知'}</span>
+        <span className={styles.footerSep}>·</span>
+        <span className={styles.versionState}>
+          {versionState === 'outdated'
+            ? '有新版本'
+            : versionState === 'current' ? '已是最新' : '无法检查更新'}
+        </span>
+        {versionState === 'outdated' && (
+          <span className={styles.versionActions}>
+            {versionLine.aheadOf.includes('npm') && (
+              <Button
+                variant="primary"
+                disabled={updating !== undefined}
+                onClick={() => { runUpdate('npm', updateFromNpm, versionLine.npm ?? versionLine.current) }}
+              >
+                {updating === 'npm' ? '更新中…' : '一键更新'}
+              </Button>
+            )}
+            {versionLine.aheadOf.includes('github') && (
+              <Button
+                variant={versionLine.aheadOf.includes('npm') ? 'ghost' : 'primary'}
+                disabled={updating !== undefined}
+                onClick={() => { runUpdate('github', installFromGithub, versionLine.github ?? versionLine.current) }}
+              >
+                {updating === 'github' ? '安装中…' : '从 GitHub 装'}
+              </Button>
+            )}
+          </span>
+        )}
+        {outcome !== undefined && <span className={styles.versionFoot}>{outcome.message}</span>}
+        {versionLine.stale && versionLine.writtenBy !== undefined && (
+          <span className={styles.versionFoot}>
+            快照由 {versionLine.writtenBy} 写入，远端数字暂不可用
+          </span>
+        )}
+        {checkedAgo !== undefined && (
+          <span className={checkedStale ? styles.versionFootWarn : styles.versionFoot}>
+            上次检查：{checkedAgo}
+          </span>
+        )}
+        <span className={styles.versionFoot}>更新通道：{updateState()}</span>
+      </div>
 
       {snapshot.status === 'loading' && (
         <div className={styles.inlineActions}>
@@ -380,53 +442,6 @@ export function OpenDesignSection({
           </>
         )}
       </Card>
-
-      {update !== undefined && (
-        <Card
-          title={`有新版本（当前 ${update.current}）`}
-          description="桌面端插件管理里也能更新；这里的两个按钮走同一条 Host 通道。"
-          badge={outcome === undefined
-            ? undefined
-            : outcome.ok ? <Badge tone="ok">完成</Badge> : <Badge tone="warn">失败</Badge>}
-        >
-          {outcome !== undefined && (
-            <p className={styles.routeLine}>{outcome.message}</p>
-          )}
-          {update.latest !== undefined && (
-            <Row
-              label={`npm：${update.latest}`}
-              hint="走 npm registry，与插件管理界面同一条路径。刚发布的版本可能被 pnpm 的最短发布时长检查拦下，几小时后再试即可。"
-            >
-              <Button
-                variant="primary"
-                disabled={updating !== undefined}
-                onClick={() => { runUpdate('npm', updateFromNpm, update.latest as string) }}
-              >
-                {updating === 'npm' ? '更新中…' : '一键更新'}
-              </Button>
-            </Row>
-          )}
-          {update.githubLatest !== undefined && (
-            <Row
-              label={`GitHub：v${update.githubLatest}`}
-              hint="从仓库标签安装。会先卸载当前版本再装，失败时自动装回原版本；适合 registry 还没轮到、或想装回某个具体版本。"
-            >
-              <Button
-                variant={update.latest === undefined ? 'primary' : 'ghost'}
-                disabled={updating !== undefined}
-                onClick={() => { runUpdate('github', installFromGithub, update.githubLatest as string) }}
-              >
-                {updating === 'github' ? '安装中…' : '从 GitHub 装'}
-              </Button>
-            </Row>
-          )}
-          <p className={styles.routeLine}>
-            {/* The stage is shown because "nothing happened" on a failed click is
-                indistinguishable from a page that never wired the namespace. */}
-            <span className={styles.noticeFoot}>更新通道：{updateState()}</span>
-          </p>
-        </Card>
-      )}
 
       <div className={styles.footer}>
         <a className={styles.link} href="https://github.com/EliteOtaku/dsh-opendesign-go" target="_blank" rel="noreferrer noopener">

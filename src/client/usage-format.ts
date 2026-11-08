@@ -136,3 +136,25 @@ export function daysToExhaust(window: {
   if (perMs <= 0) return undefined
   return (limit - used) / perMs / 86_400_000
 }
+
+/**
+ * Describe how long ago a timestamp was.
+ *
+ * The version line is always on screen, so it has to say when its remote
+ * numbers were read: a refused cache write leaves the previous start's numbers
+ * in place, and without a time they read as current.
+ * @param iso - timestamp, or undefined when the snapshot carried none.
+ * @param now - current time in epoch milliseconds, injectable for tests.
+ * @returns a short phrase such as `3 分钟前`, or undefined for unreadable input.
+ */
+export function relativeTime(iso: string | undefined, now: number = Date.now()): string | undefined {
+  if (iso === undefined || iso.length === 0) return undefined
+  const at = Date.parse(iso)
+  if (!Number.isFinite(at)) return undefined
+  const minutes = Math.floor((now - at) / 60_000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  return `${Math.floor(hours / 24)} 天前`
+}

@@ -83,36 +83,63 @@ export declare function parseLatestTag(body: unknown): string | undefined;
  * @returns the version, or undefined when it could not be read.
  */
 export declare function fetchLatestTag(fetchImpl?: typeof fetch, timeoutMs?: number): Promise<string | undefined>;
+/** A source a newer release can come from. */
+export type UpdateSource = 'npm' | 'github';
 /**
- * Decide whether a discovered version is an upgrade worth reporting.
- * @param current - this build's version.
- * @param latest - version found on the registry, if any.
- * @returns the newer version string, or undefined when there is nothing to say.
+ * Everything the settings page knows about versions.
+ *
+ * A source that did not answer is `undefined`, which is deliberately different
+ * from "answered and is not newer": the page must be able to say "could not
+ * check" instead of claiming the copy is current.
  */
-export declare function pendingUpdate(current: string, latest: LatestRelease | undefined): string | undefined;
-/** What the settings page shows when a newer release exists. */
-export interface UpdateNotice {
+export interface VersionLine {
     /** Version this build reports. */
     readonly current: string;
-    /** Newest version the npm registry publishes, when it is newer than this build. */
-    readonly latest: string | undefined;
-    /** Newest version tagged in the repository, when it is newer than this build. */
-    readonly githubLatest: string | undefined;
-    /** Project page, when the registry carried one. */
-    readonly homepage: string | undefined;
+    /** Newest version on the registry, when this start reached it. */
+    readonly npm: string | undefined;
+    /** Newest repository tag, when this start reached it. */
+    readonly github: string | undefined;
+    /** When the check that produced these numbers finished. */
+    readonly checkedAt: string | undefined;
+    /** Sources carrying a strictly newer version than this build. */
+    readonly aheadOf: readonly UpdateSource[];
+    /** Whether the cache was written by a different build. */
+    readonly stale: boolean;
+    /** Version that wrote the cache, when it was a different build. */
+    readonly writtenBy: string | undefined;
 }
+/** How the version line should read. */
+export type VersionState = 'current' | 'outdated' | 'unknown';
 /**
- * Read the update notice from its serialized settings field.
+ * Read the version snapshot out of its serialized settings field.
  *
- * A malformed value reads as "no notice" rather than throwing: the field is
- * written by a background check, and one bad character must not take the whole
- * settings page down.
- *
- * A notice is kept when **either** source is ahead: the two surfaces can
- * disagree — a tag is pushed before the registry answers, and a registry
- * publish can exist without a tag — and suppressing the card because the other
- * source is current would hide the one route that does have something to offer.
- * @param raw - serialized notice, or undefined/empty when unset.
- * @returns the notice, or undefined when there is nothing to show.
+ * Returns a value even when the field is missing or malformed: the page shows
+ * this build's own version regardless, and the remote halves degrade to
+ * "unknown". Never throws — one bad character must not take the settings page
+ * down.
+ * @param raw - serialized snapshot, or undefined/empty when unset.
+ * @param current - this build's version; a snapshot written by another version
+ * is reported as `stale` instead of being read as facts.
+ * @returns the snapshot view.
  */
-export declare function parseUpdate(raw: string | undefined): UpdateNotice | undefined;
+export declare function parseVersionLine(raw: string | undefined, current?: string): VersionLine;
+/**
+ * Reduce a snapshot to the one state the page paints.
+ * @param line - parsed snapshot.
+ * @returns outdated when a source is ahead, current only when both answered,
+ * unknown otherwise.
+ */
+export declare function versionStateOf(line: VersionLine): VersionState;
+/**
+ * Serialize one startup check into the settings field.
+ *
+ * Written even when neither source answered: "checked, nothing newer" and
+ * "could not check" have to stay distinguishable on the page, and an absent
+ * field cannot express the difference.
+ * @param release - registry answer, or undefined when it was not read.
+ * @param tag - newest repository tag, or undefined when it was not read.
+ * @param now - check completion time, injectable for tests.
+ * @param current - this build's version.
+ * @returns the JSON payload for the cache field.
+ */
+export declare function snapshotOf(release: LatestRelease | undefined, tag: string | undefined, now?: Date, current?: string): string;

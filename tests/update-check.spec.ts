@@ -5,8 +5,9 @@ import {
   fetchLatestTag,
   parseLatestRelease,
   parseLatestTag,
-  parseUpdate,
-  pendingUpdate,
+  parseVersionLine,
+  snapshotOf,
+  versionStateOf,
 } from '../src/update-check.ts'
 
 /** Minimal fetch double returning one canned response. */
@@ -59,17 +60,6 @@ describe('parseLatestRelease', () => {
   })
 })
 
-describe('pendingUpdate', () => {
-  it('reports only a strictly newer version', () => {
-    expect(pendingUpdate('0.1.2', { version: '0.1.3', homepage: undefined })).toBe('0.1.3')
-    expect(pendingUpdate('0.1.2', { version: '0.1.2', homepage: undefined })).toBeUndefined()
-    expect(pendingUpdate('0.1.2', { version: '0.1.1', homepage: undefined })).toBeUndefined()
-  })
-
-  it('says nothing when the registry was unreachable', () => {
-    expect(pendingUpdate('0.1.2', undefined)).toBeUndefined()
-  })
-})
 
 describe('fetchLatestRelease', () => {
   it('reads the published version', async () => {
@@ -151,32 +141,145 @@ describe('fetchLatestTag', () => {
   })
 })
 
-describe('parseUpdate', () => {
-  it('reads a pending update', () => {
-    expect(parseUpdate(JSON.stringify({ current: '0.1.2', latest: '0.2.0' })))
-      .toEqual({ current: '0.1.2', latest: '0.2.0', githubLatest: undefined, homepage: undefined })
+
+describe('parseVersionLine', () => {
+  const CURRENT = '0.1.16'
+  /** Read one raw snapshot at a fixed local version. */
+  const line = (raw: unknown, current = CURRENT) =>
+    parseVersionLine(typeof raw === 'string' ? raw : JSON.stringify(raw), current)
+
+  it('reads both sources and reports nothing to do when neither is ahead', () => {
+    expect(line({ current: CURRENT, npm: '0.1.14', github: '0.1.16', checkedAt: '2026-11-08T09:00:00.000Z' }))
+      .toEqual({
+        current: CURRENT,
+        npm: '0.1.14',
+        github: '0.1.16',
+        checkedAt: '2026-11-08T09:00:00.000Z',
+        aheadOf: [],
+        stale: false,
+        writtenBy: undefined,
+      })
   })
 
-  it('keeps the notice when only the repository tag is ahead', () => {
-    // A tag is pushed before the registry answers, so a card that required both
-    // sources to be ahead would stay silent during the one window where the
-    // GitHub route has something to install.
-    expect(parseUpdate(JSON.stringify({ current: '0.1.2', latest: '0.1.2', githubLatest: '0.2.0' })))
-      .toEqual({ current: '0.1.2', latest: undefined, githubLatest: '0.2.0', homepage: undefined })
+  it('names only the sources that are strictly newer', () => {
+    expect(line({ current: CURRENT, npm: '0.1.16', github: '0.1.17' }).aheadOf).toEqual(['github'])
+    expect(line({ current: CURRENT, npm: '0.1.17', github: '0.1.15' }).aheadOf).toEqual(['npm'])
+    expect(line({ current: CURRENT, npm: '0.1.17', github: '0.1.17' }).aheadOf).toEqual(['npm', 'github'])
+    // Equal is not ahead: an installed copy must never be told to update to itself.
+    expect(line({ current: CURRENT, npm: CURRENT, github: CURRENT }).aheadOf).toEqual([])
   })
 
-  it('suppresses a stale notice that no longer represents an upgrade', () => {
-    // The field persists across upgrades; without this check a stale value would
-    // render "newer version 0.1.0（当前 0.1.2）".
-    expect(parseUpdate(JSON.stringify({ current: '0.1.2', latest: '0.1.0' }))).toBeUndefined()
-    expect(parseUpdate(JSON.stringify({ current: '0.1.2', latest: '0.1.2' }))).toBeUndefined()
-    expect(parseUpdate(JSON.stringify({ current: '0.1.2', latest: '0.1.2', githubLatest: '0.1.2' }))).toBeUndefined()
+  it('keeps a source that did not answer as unknown instead of "no update"', () => {
+    const onlyTag = line({ current: CURRENT, github: '0.1.16' })
+    expect(onlyTag.npm).toBeUndefined()
+    expect(onlyTag.github).toBe('0.1.16')
+
+    const nothing = line({ current: CURRENT })
+    expect(nothing.npm).toBeUndefined()
+    expect(nothing.github).toBeUndefined()
   })
 
-  it('treats absent or malformed input as no notice', () => {
-    expect(parseUpdate(undefined)).toBeUndefined()
-    expect(parseUpdate('')).toBeUndefined()
-    expect(parseUpdate('{')).toBeUndefined()
-    expect(parseUpdate(JSON.stringify({ latest: '0.2.0' }))).toBeUndefined()
+  it('reads the 0.1.15 shape once, so an upgrade does not lose the card', () => {
+    expect(line({ current: CURRENT, latest: '0.1.17', githubLatest: '0.1.18' }))
+      .toEqual({
+        current: CURRENT,
+        npm: '0.1.17',
+        github: '0.1.18',
+        checkedAt: undefined,
+        aheadOf: ['npm', 'github'],
+        stale: false,
+        writtenBy: undefined,
+      })
+  })
+
+  it('refuses remote numbers written by another build', () => {
+    // The field persists across upgrades; last build's remote versions answer
+    // last build's question, so showing them would state a fact about the wrong
+    // question.
+    expect(line({ current: '0.1.15', npm: '0.1.17', github: '0.1.18' }))
+      .toEqual({
+        current: CURRENT,
+        npm: undefined,
+        github: undefined,
+        checkedAt: undefined,
+        aheadOf: [],
+        stale: true,
+        writtenBy: '0.1.15',
+      })
+  })
+
+  it('treats unreadable input as "nothing known" rather than throwing', () => {
+    const empty = {
+      current: CURRENT,
+      npm: undefined,
+      github: undefined,
+      checkedAt: undefined,
+      aheadOf: [],
+      stale: false,
+      writtenBy: undefined,
+    }
+    for (const raw of [undefined, '', '{', 'null', '[]', '42', '"x"']) {
+      expect(() => parseVersionLine(raw, CURRENT)).not.toThrow()
+    }
+    expect(parseVersionLine(undefined, CURRENT)).toEqual(empty)
+    expect(parseVersionLine('', CURRENT)).toEqual(empty)
+    expect(parseVersionLine('{', CURRENT)).toEqual(empty)
+    expect(parseVersionLine(JSON.stringify({ npm: '0.1.17' }), CURRENT)).toEqual(empty)
+  })
+})
+
+describe('versionStateOf', () => {
+  const BASE = {
+    current: '0.1.16',
+    npm: undefined,
+    github: undefined,
+    checkedAt: undefined,
+    aheadOf: [],
+    stale: false,
+    writtenBy: undefined,
+  } as const
+
+  it('reports outdated as soon as any source is ahead', () => {
+    expect(versionStateOf({ ...BASE, aheadOf: ['npm'] })).toBe('outdated')
+    expect(versionStateOf({ ...BASE, aheadOf: ['github'] })).toBe('outdated')
+    expect(versionStateOf({ ...BASE, aheadOf: ['npm', 'github'] })).toBe('outdated')
+  })
+
+  it('reports current only when both sources answered and neither is ahead', () => {
+    expect(versionStateOf({ ...BASE, npm: '0.1.16', github: '0.1.16' })).toBe('current')
+    expect(versionStateOf({ ...BASE, npm: '0.1.14', github: '0.1.15' })).toBe('current')
+  })
+
+  it('reports unknown when a source did not answer', () => {
+    expect(versionStateOf({ ...BASE, npm: '0.1.16' })).toBe('unknown')
+    expect(versionStateOf({ ...BASE, github: '0.1.16' })).toBe('unknown')
+    expect(versionStateOf(BASE)).toBe('unknown')
+  })
+})
+
+
+describe('snapshotOf', () => {
+  const AT = new Date('2026-11-08T09:00:00.000Z')
+  /** Parse the JSON back so the assertion reads as a shape, not a string. */
+  const shape = (json: string): unknown => JSON.parse(json)
+
+  it('records both sources when both answered', () => {
+    expect(shape(snapshotOf({ version: '0.1.17', homepage: undefined }, '0.1.18', AT, '0.1.16')))
+      .toEqual({ current: '0.1.16', npm: '0.1.17', github: '0.1.18', checkedAt: '2026-11-08T09:00:00.000Z' })
+  })
+
+  it('omits a source that did not answer instead of writing null', () => {
+    // Absent and null would both serialize, but only absent means "not checked".
+    expect(shape(snapshotOf(undefined, undefined, AT, '0.1.16')))
+      .toEqual({ current: '0.1.16', checkedAt: '2026-11-08T09:00:00.000Z' })
+    expect(shape(snapshotOf(undefined, '0.1.18', AT, '0.1.16')))
+      .toEqual({ current: '0.1.16', github: '0.1.18', checkedAt: '2026-11-08T09:00:00.000Z' })
+  })
+
+  it('keeps a source that answered with a version behind this build', () => {
+    // The registry can trail the repository; the number is still worth showing
+    // so a missing button has a visible explanation.
+    expect(shape(snapshotOf({ version: '0.1.14', homepage: undefined }, undefined, AT, '0.1.16')))
+      .toEqual({ current: '0.1.16', npm: '0.1.14', checkedAt: '2026-11-08T09:00:00.000Z' })
   })
 })

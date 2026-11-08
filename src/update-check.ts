@@ -14,6 +14,8 @@
  * @module dsh-opendesign-go/update-check
  */
 
+import { PLUGIN_VERSION } from './config-contract.ts'
+
 /** Package name, as the registry, GitHub and the profile all spell it. */
 export const PACKAGE_NAME = 'dsh-opendesign-go'
 
@@ -167,63 +169,131 @@ export async function fetchLatestTag(
   }
 }
 
-/**
- * Decide whether a discovered version is an upgrade worth reporting.
- * @param current - this build's version.
- * @param latest - version found on the registry, if any.
- * @returns the newer version string, or undefined when there is nothing to say.
- */
-export function pendingUpdate(current: string, latest: LatestRelease | undefined): string | undefined {
-  if (latest === undefined) return undefined
-  return compareVersions(latest.version, current) > 0 ? latest.version : undefined
-}
+/** A source a newer release can come from. */
+export type UpdateSource = 'npm' | 'github'
 
-/** What the settings page shows when a newer release exists. */
-export interface UpdateNotice {
+/**
+ * Everything the settings page knows about versions.
+ *
+ * A source that did not answer is `undefined`, which is deliberately different
+ * from "answered and is not newer": the page must be able to say "could not
+ * check" instead of claiming the copy is current.
+ */
+export interface VersionLine {
   /** Version this build reports. */
   readonly current: string
-  /** Newest version the npm registry publishes, when it is newer than this build. */
-  readonly latest: string | undefined
-  /** Newest version tagged in the repository, when it is newer than this build. */
-  readonly githubLatest: string | undefined
-  /** Project page, when the registry carried one. */
-  readonly homepage: string | undefined
+  /** Newest version on the registry, when this start reached it. */
+  readonly npm: string | undefined
+  /** Newest repository tag, when this start reached it. */
+  readonly github: string | undefined
+  /** When the check that produced these numbers finished. */
+  readonly checkedAt: string | undefined
+  /** Sources carrying a strictly newer version than this build. */
+  readonly aheadOf: readonly UpdateSource[]
+  /** Whether the cache was written by a different build. */
+  readonly stale: boolean
+  /** Version that wrote the cache, when it was a different build. */
+  readonly writtenBy: string | undefined
+}
+
+/** How the version line should read. */
+export type VersionState = 'current' | 'outdated' | 'unknown'
+
+/** One non-empty string out of an unknown value, or undefined. */
+function textOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
 /**
- * Read the update notice from its serialized settings field.
+ * Read the version snapshot out of its serialized settings field.
  *
- * A malformed value reads as "no notice" rather than throwing: the field is
- * written by a background check, and one bad character must not take the whole
- * settings page down.
- *
- * A notice is kept when **either** source is ahead: the two surfaces can
- * disagree — a tag is pushed before the registry answers, and a registry
- * publish can exist without a tag — and suppressing the card because the other
- * source is current would hide the one route that does have something to offer.
- * @param raw - serialized notice, or undefined/empty when unset.
- * @returns the notice, or undefined when there is nothing to show.
+ * Returns a value even when the field is missing or malformed: the page shows
+ * this build's own version regardless, and the remote halves degrade to
+ * "unknown". Never throws — one bad character must not take the settings page
+ * down.
+ * @param raw - serialized snapshot, or undefined/empty when unset.
+ * @param current - this build's version; a snapshot written by another version
+ * is reported as `stale` instead of being read as facts.
+ * @returns the snapshot view.
  */
-export function parseUpdate(raw: string | undefined): UpdateNotice | undefined {
-  if (raw === undefined || raw.length === 0) return undefined
+export function parseVersionLine(raw: string | undefined, current: string = PLUGIN_VERSION): VersionLine {
+  const empty: VersionLine = {
+    current,
+    npm: undefined,
+    github: undefined,
+    checkedAt: undefined,
+    aheadOf: [],
+    stale: false,
+    writtenBy: undefined,
+  }
+  if (raw === undefined || raw.length === 0) return empty
+
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
-    return undefined
+    return empty
   }
-  if (parsed === null || typeof parsed !== 'object') return undefined
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return empty
+
   const row = parsed as Record<string, unknown>
-  const current = row.current
-  if (typeof current !== 'string' || current.length === 0) return undefined
-  /** Keep a version only when it is actually ahead of this build. */
-  const ahead = (value: unknown): string | undefined =>
-    // A stale field that still names this build (or an older one) would render
-    // "新版本 0.1.0（当前 0.1.2）", which reads as a downgrade.
-    (typeof value === 'string' && value.length > 0 && compareVersions(value, current) > 0 ? value : undefined)
-  const latest = ahead(row.latest)
-  const githubLatest = ahead(row.githubLatest)
-  if (latest === undefined && githubLatest === undefined) return undefined
-  const homepage = typeof row.homepage === 'string' ? row.homepage : undefined
-  return { current, latest, githubLatest, homepage }
+  const written = textOf(row.current)
+  if (written === undefined) return empty
+
+  // 0.1.15 wrote `latest` / `githubLatest`, and only for a source that was
+  // ahead. Reading those names once means an upgrade shows the old card instead
+  // of going blank until the next start check lands.
+  const npm = textOf(row.npm) ?? textOf(row.latest)
+  const github = textOf(row.github) ?? textOf(row.githubLatest)
+  const checkedAt = textOf(row.checkedAt)
+
+  if (written !== current) {
+    // A snapshot without a writer version is old enough to predate this field;
+    // treat it the same way rather than trusting numbers authored elsewhere.
+    return { ...empty, stale: true, writtenBy: written }
+  }
+
+  const aheadOf: UpdateSource[] = []
+  if (npm !== undefined && compareVersions(npm, current) > 0) aheadOf.push('npm')
+  if (github !== undefined && compareVersions(github, current) > 0) aheadOf.push('github')
+
+  return { current, npm, github, checkedAt, aheadOf, stale: false, writtenBy: undefined }
+}
+
+/**
+ * Reduce a snapshot to the one state the page paints.
+ * @param line - parsed snapshot.
+ * @returns outdated when a source is ahead, current only when both answered,
+ * unknown otherwise.
+ */
+export function versionStateOf(line: VersionLine): VersionState {
+  if (line.aheadOf.length > 0) return 'outdated'
+  if (line.npm !== undefined && line.github !== undefined) return 'current'
+  return 'unknown'
+}
+
+/**
+ * Serialize one startup check into the settings field.
+ *
+ * Written even when neither source answered: "checked, nothing newer" and
+ * "could not check" have to stay distinguishable on the page, and an absent
+ * field cannot express the difference.
+ * @param release - registry answer, or undefined when it was not read.
+ * @param tag - newest repository tag, or undefined when it was not read.
+ * @param now - check completion time, injectable for tests.
+ * @param current - this build's version.
+ * @returns the JSON payload for the cache field.
+ */
+export function snapshotOf(
+  release: LatestRelease | undefined,
+  tag: string | undefined,
+  now: Date = new Date(),
+  current: string = PLUGIN_VERSION,
+): string {
+  return JSON.stringify({
+    current,
+    ...(release === undefined ? {} : { npm: release.version }),
+    ...(tag === undefined ? {} : { github: tag }),
+    checkedAt: now.toISOString(),
+  })
 }
