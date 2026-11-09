@@ -16,7 +16,7 @@ export declare const DISPLAY_NAME = "OpenDesign Go";
  * a single file with no reliable path back to its own package, and the update
  * check needs a value it can compare without filesystem access.
  */
-export declare const PLUGIN_VERSION = "0.1.18";
+export declare const PLUGIN_VERSION = "0.1.19";
 /** Settings namespace this plugin installs and the Web page edits. */
 export declare const SETTINGS_NAMESPACE = "llm-opendesign-go";
 /**
@@ -64,7 +64,7 @@ export interface OpenDesignAccount {
     readonly apiKeyEnv: string;
     /**
      * Console workspace id, needed only to read quota for this account. Omitted
-     * means "inference works, quota display is unavailable" — never guessed.
+     * means "inference works, quota display is unavailable" �?never guessed.
      */
     readonly workspaceId?: string;
 }
@@ -131,7 +131,7 @@ export interface OpenDesignConfig {
      *
      * A JSON string rather than a `dict` field: the settings form walker only
      * descends `object` and `dict` nodes that survive `volatile()`, and a dict of
-     * objects silently drops out of the projection — the same failure that once
+     * objects silently drops out of the projection �?the same failure that once
      * hid this plugin's whole page.
      */
     readonly modelParamsJson: string;
@@ -164,7 +164,7 @@ export interface OpenDesignConfig {
      *
      * Off by default. The recovery reads every session on the machine, so it
      * includes traffic from other agents sharing the key (undercounting the true
-     * total) and other workspaces (overcounting this one) — the direction of the
+     * total) and other workspaces (overcounting this one) �?the direction of the
      * error is unknown, which makes an opt-in the honest default.
      */
     readonly recoveredEnabled: boolean;

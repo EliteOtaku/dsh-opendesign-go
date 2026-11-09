@@ -1,4 +1,14 @@
-/** The one method this plugin uses from the host's attachment store. */
+import type { ImageBlock } from '@deepseek-ai/dsh-llm';
+/**
+ * One image committed to the store, as the store answers.
+ *
+ * Named from the block's own attachment field rather than declared again: the
+ * store returns exactly what an {@link ImageBlock} carries, and a second
+ * declaration would drift from that contract the first time either side gained a
+ * field.
+ */
+export type SavedImage = ImageBlock['attachment'];
+/** The methods this plugin uses from the host's attachment store. */
 export interface AttachmentsSeam {
     /**
      * Resolve one durable image reference to its normalized bytes on disk.
@@ -6,6 +16,19 @@ export interface AttachmentsSeam {
      * @returns an absolute path, or undefined when the store keeps no local file.
      */
     readonly imageHostPath?: (ref: unknown) => string | undefined;
+    /**
+     * Validate and durably commit one generated image.
+     *
+     * Absent on a host whose store has no write path, which is why the image route
+     * refuses to generate rather than returning bytes the session cannot keep.
+     * @param input - encoded bytes and declared media type.
+     * @returns the durable reference.
+     */
+    readonly saveImage?: (input: {
+        readonly data: Uint8Array;
+        readonly mediaType: string;
+        readonly name?: string;
+    }) => Promise<SavedImage>;
 }
 /**
  * Guess a media type from a normalized attachment's extension.

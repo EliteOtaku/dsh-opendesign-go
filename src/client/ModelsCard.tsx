@@ -192,10 +192,16 @@ export function ModelsCard({ form, config, editable }: {
                   <Switch checked={on} disabled={!editable} onChange={() => { toggle(model.id) }} label={`在模型列表中${on ? '停用' : '启用'} ${model.name}`} />
                   <div className={styles.modelText}>
                     <span className={styles.modelName}>{model.name}</span>
-                    <span className={styles.modelId}>{model.id}</span>
+                    <span className={styles.modelId}>
+                      {model.id}
+                      {model.imageGeneration === true && <span className={styles.generic}>生图模型</span>}
+                    </span>
                   </div>
                 </div>
                 <div className={styles.modelSide}>
+                  {model.imageGeneration === true ? (
+                    <span className={styles.modelMeta}>走 /images/generations，无上下文参数</span>
+                  ) : (
                   <span className={styles.modelMeta}>
                     上下文 {context === undefined ? '未知' : tokens(context)}
                     {context !== undefined && max !== undefined ? `（可用输入 ${tokens(usableInputTokens(context, max))}）` : ''}
@@ -203,6 +209,8 @@ export function ModelsCard({ form, config, editable }: {
                     {override !== undefined && <span className={styles.edited}>（已改）</span>}
                     {undocumented && <span className={styles.generic}>参数未收录</span>}
                   </span>
+                  )}
+                  {model.imageGeneration !== true && (
                   <Button
                     disabled={!editable}
                     onClick={() => {
@@ -223,16 +231,24 @@ export function ModelsCard({ form, config, editable }: {
                   >
                     {isEditing ? '取消' : '改参数'}
                   </Button>
+                  )}
                 </div>
               </div>
 
-              {undocumented && (
+              {model.imageGeneration === true && (
+                <p className={styles.hint}>
+                  这是生图模型：会话里选中它时，插件会把这一轮的提示词发到 /images/generations，
+                  把返回的图片存进附件库并作为一个图片块贴进回复，所以生成的图片可以继续被其它模型读取。
+                  它没有上下文窗口和 max_tokens 可调，参数区因此隐藏。
+                </p>
+              )}
+              {model.imageGeneration !== true && undocumented && (
                 <p className={styles.hint}>
                   插件未收录该模型的官方规格，上面是通用默认值（上下文 1M、输出 128K、全部思考档位）。
                   请按厂商文档核对后点「改参数」修改；改过的值不再显示此提示。
                 </p>
               )}
-              {isEditing && (
+              {model.imageGeneration !== true && isEditing && (
                 <div className={styles.editor}>
                   <div className={styles.editorRow}>
                     <Field label="上下文窗口">

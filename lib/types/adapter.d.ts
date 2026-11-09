@@ -17,6 +17,7 @@
 import { LlmAdapter } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
 import { type OpenDesignConfig } from './config-contract.ts';
+import type { AttachmentsSeam } from './image-bytes.ts';
 /** What one adapter instance reads from the plugin. */
 export interface OpenDesignAdapterOptions {
     /** Current plugin configuration; read per request so settings changes apply. */
@@ -49,6 +50,15 @@ export interface OpenDesignAdapterOptions {
         accountRef: string;
         usage: TokenUsage;
     }) => void;
+    /**
+     * Current attachment store, or undefined when none is mounted.
+     *
+     * Read through a function because the store is injected asynchronously: the
+     * adapter is constructed before `ctx.inject(['attachments'])` settles, so
+     * capturing the store at construction would pin the absent case forever.
+     * @returns the mounted store, or undefined.
+     */
+    attachments?: () => AttachmentsSeam | undefined;
     /**
      * Turn one durable image reference into an inline data URL.
      *
