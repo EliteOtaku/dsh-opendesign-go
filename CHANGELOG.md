@@ -2,6 +2,30 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 0.1.19
+
+修两个都会让会话彻底没法继续的问题：图片多的会话必定 413，生图模型选中就报错。
+
+### 图片请求预算
+
+现象是一句 `OpenDesign request failed (413)`，后面跟着 nginx 的 HTML 报错页；同时压缩也失败，报 `Compaction could not produce a useful summary`。整个会话就此卡死，换任何模型都一样。
+
+根因是请求体里的图片字节没有任何上界。Chat Completions 没有 Files 上传，所以每一轮的每一张历史图片都要按 base64 重发一次 —— 实测那个会话累计 20 张 2048px PNG，原始 16.68 MB，base64 后 22.24 MB，横竖都比网关前面 nginx 的接受上限大。压缩要发同一份历史，于是同样被拒。
+
+现在按宿主已有的 `IMAGE_OFFLOAD_REQUIRED` 契约处理：请求超预算时不自己丢图，而是抛一个带 `offloadImages: N` 的错误，由 `dsh-compaction-image-offload` 记一条 `image/offload` 事件再重试。自己不丢是因为**没记录的投影会让会话日志与实际发送的内容不一致** —— 日志说那轮带了图，模型其实没看到，之后的回放和计费全都对不上。
+
+预算取 24 MiB / 60 张，按 8 MiB 与 20 张的整块前进（按最小需要量丢，会每轮多丢一张、每次重写历史都打断 prompt 缓存）。网关不公布这个阈值，24 MiB 是保守值：同类网关实测约 50.17 MB，取一半留足余量给文本、工具声明和 JSON 框架。
+
+只在真的会发图片字节的路由上计量。纯文本模型下图片本来就投影成占位文本，对它计费会要求一次释放不了任何字节的 offload。
+
+### 生图模型
+
+`gpt-image-2`、`seedream-5.0`、`nano-banana-2` 这些 id 一直在模型列表里，选中之后每个请求都失败。原因是 `GET /models` 把对话模型和生图模型混在一个列表里，只给 id 不给输出模态，插件把每个 id 都当对话模型，用通用默认值补成「1M 上下文」然后 `POST /chat/completions` —— 网关必然拒绝。
+
+现在目录快照多记一个 `imageIds`，标出哪些 id 是生图模型；选中它们时改走 `POST /images/generations`，返回的 base64 经 `attachments.saveImage` 落成持久引用，作为一个正常的 assistant 图片块贴进回复。所以生成的图能被后续对话继续读取，重启也还在。
+
+设置页给这些行加了「生图模型」标注，并隐藏上下文/输出上限与「改参数」——它们没有这些参数。分类规则是：目录声明了 `output_modalities` 就以声明为准（双向有效），只有什么都没说时才查已知生图 id 表。
+
 ## 0.1.18
 
 支持 Plus / Pro / Max 套餐的模型（issue #3）。

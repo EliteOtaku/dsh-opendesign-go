@@ -171,6 +171,52 @@
 
 `kimi-k2.7-code` 官方说明支持图片输入，但对**工具消息**里的图片会回答"无法读取此图"（直接贴图正常）。这是模型侧的差异，不是插件过滤。
 
+## 图片请求预算
+
+Chat Completions 没有 Files 上传，所以每一轮的每一张历史图片都要按 base64 长度重发一次。请求体因此随会话单调增长，直到网关前面的 nginx 直接拒收 —— 返回一个不含阈值、也不是 JSON 的 HTML 413 页面。压缩要发同一份历史，所以压缩也会同样失败，整个会话就此卡死。
+
+预算在 `src/image-request-budget.ts`：
+
+| 常量 | 值 |
+| --- | --- |
+| 单请求内联图片字节 | 24 MiB |
+| 每次 offload 移除的字节 | 8 MiB |
+| 单请求图片张数 | 60 |
+| 每次 offload 移除的张数 | 20 |
+
+超预算时不自己丢图，而是抛 `IMAGE_OFFLOAD_REQUIRED` 并带上 `offloadImages: N`，由 `dsh-compaction-image-offload` 记一条 `image/offload` 事件再重试，派生器把被选中的图片投影成占位文本。自己不丢是因为没记录的投影会让会话日志与实际发送的内容不一致：日志说那轮带了图，模型其实没看到，之后的回放和计费全都对不上。
+
+按整块（8 MiB / 20 张）而不是最小需要量前进，是为了让被丢的前缀跨多轮保持稳定 —— 每轮多丢一张，每次重写历史都会从第一张被改的图开始打断 prompt 缓存。
+
+只在真的会发图片字节的路由上计量。纯文本模型下图片本来就投影成占位文本，对它计费会要求一次释放不了任何字节的 offload。
+
+24 MiB 是保守值，不是测出来的：网关不公布上限。同类的 Command Code 适配器实测其网关约 50.17 MB，这里取一半，留足余量给文本、工具声明和 JSON 框架。
+
+## 生图模型
+
+网关的 `GET /models` 把对话模型和生图模型混在一个列表里，只给 id 不给输出模态。`gpt-image-2`、`seedream-5.0`、`nano-banana-2` 这类 id 无法用 `POST /chat/completions` 服务，它们只吃 `POST /images/generations`。
+
+目录快照因此多记一个 `imageIds` 字段（是 `ids` 的子集）。选中这些模型时的行为：
+
+1. 取本轮最后一条 user 消息的可见文本作为 prompt；
+2. `POST {baseURL}/images/generations`，body 是 `{model, prompt, n: 1}`，请求 `size` 时可带上 `size`；
+3. 返回的 base64 逐张经 `attachments.saveImage` 落成持久引用；
+4. 作为正常的 assistant image block 贴进回复 —— `ImageBlock` 是 role-neutral 的，会话的图片画廊和 ACP 桥都会渲染它。
+
+因此生成的图片能被后续对话继续读取，重启也还在。
+
+几个明确的边界：
+
+- **不重试。** 重试归宿主管；这里重试会为一份没人留下的产物付两次钱。
+- **宿主没有附件存储就拒绝生成**（`UNSUPPORTED_OPTION`），而不是返回一条指向不存在附件的坏图。
+- **prompt 为空就拒绝**（`INVALID_REQUEST`）：`/images/generations` 没有会话概念，空 prompt 会让网关生成一张随机图并计费。
+- **不报 usage。** Images 端点不报 token，编一个数字会让账本记录无法核对的支出。
+- **不支持图生图。** `/images/generations` 不吃图片输入，所以「把刚才那张图改成蓝色」这类要求无法工作；要做得换成 `/images/edits`，本期没做。
+
+设置页给这些行加了「生图模型」标注，并隐藏上下文窗口、输出上限与「改参数」——它们没有这些参数。
+
+分类规则（`src/catalog.ts` 的 `isImageModel`）：目录声明了 `output_modalities` 就以声明为准，**双向**有效 —— 声明 `["text"]` 的即使是 `gpt-image-2` 也算对话模型，没声明 `text` 的即使名字像对话模型也算生图模型。只有目录什么都没说时，才查已知生图 id 表。理由是沉默不能当成「生图」，那会误伤能用的对话模型。
+
 ## 停用模型
 
 取消勾选某个模型后：
