@@ -23,7 +23,7 @@ import { Config, assertApiKeyEnv, assertBaseURL, readConfig } from './config.ts'
 import type { LiveConfig } from './config.ts'
 import { DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract.ts'
 import type { OpenDesignConfig } from './config-contract.ts'
-import { GO_DESIGN_PLAN_MODELS, listSeedModels } from './catalog.ts'
+import { GO_DESIGN_PLAN_MODELS, isImageModel, listSeedModels } from './catalog.ts'
 import { fetchGatewayModels } from './catalog-fetch.ts'
 import { accountsOf, assertAccounts } from './accounts.ts'
 import { LedgerStore } from './ledger-store.ts'
@@ -337,18 +337,30 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     // No key means the route is not registered either; writing a fallback
     // snapshot here would claim a catalog for a route that cannot serve it.
     if (key === undefined) return
-    const ids = await fetchGatewayModels(baseURL, key)
+    const entries = await fetchGatewayModels(baseURL, key)
     const asOf = new Date().toISOString()
-    const payload = ids === undefined
+    // The gateway mixes chat models with image-generation models, and the two
+    // are served by different endpoints, so the snapshot records which is which.
+    // An id the gateway did not describe is classified from the known-id table;
+    // a declared modality always wins.
+    const split = entries === undefined
+      ? { ids: GO_DESIGN_PLAN_MODELS.map((model) => model.id), imageIds: [] as string[] }
+      : {
+        ids: entries.map((entry) => entry.id),
+        imageIds: entries
+          .filter((entry) => isImageModel(entry.id, entry.outputModalities))
+          .map((entry) => entry.id),
+      }
+    const payload = entries === undefined
       ? {
         asOf,
         source: 'fallback',
-        ids: GO_DESIGN_PLAN_MODELS.map((model) => model.id),
+        ids: split.ids,
         error: '未能读取网关模型目录，正在显示内置的 Go 套餐列表',
       }
-      : { asOf, source: 'gateway', ids }
+      : { asOf, source: 'gateway', ids: split.ids, ...(split.imageIds.length === 0 ? {} : { imageIds: split.imageIds }) }
     ctx.logger.info(
-      `llm-opendesign-go: catalog ${payload.source} (${payload.ids.length} models)`,
+      `llm-opendesign-go: catalog ${payload.source} (${split.ids.length} models, ${split.imageIds.length} image)`,
     )
     const json = JSON.stringify(payload)
     void catalogRetry.publish(
@@ -619,6 +631,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     config: current,
     resolveApiKey,
     imageDataUrl,
+    attachments: () => attachments,
     onAccountSettled: (ref) => {
       // Promote a fallback account only after it produced output. The write goes
       // through the same config field the page edits, so the ordering the user

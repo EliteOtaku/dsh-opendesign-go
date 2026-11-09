@@ -879,3 +879,220 @@ describe('OpenDesignAdapter image dispatch', () => {
     expect(messages.map((row) => row.role)).toEqual(['user', 'assistant', 'tool'])
   })
 })
+
+describe('OpenDesignAdapter image budget', () => {
+  /**
+   * A history the gateway would refuse.
+   *
+   * Twenty 2048px PNGs is the session that produced the report: 16.68 MB stored,
+   * 22.24 MB once base64-encoded, sent in full on every request until the proxy
+   * in front of the gateway answered 413 with an HTML page.
+   */
+  const heavyHistory = (count: number): ContentBlock[] =>
+    Array.from({ length: count }, (_, index) => ({
+      type: 'image',
+      attachment: {
+        attachmentId: `sha256:${index}`,
+        mediaType: 'image/png',
+        bytes: 900_000,
+        width: 2048,
+        height: 2048,
+      },
+    }) as unknown as ContentBlock)
+
+  it('fails with IMAGE_OFFLOAD_REQUIRED before sending an oversized request', async () => {
+    // The harness owns the offload: it records an `image/offload` event naming
+    // which occurrences were dropped and retries. Dropping them here instead
+    // would leave the session log claiming bytes that were never sent, and the
+    // model would answer about pictures it never saw.
+    const fetchMock = stubFetch(sse(['[DONE]']))
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => 'data:image/png;base64,AAAA',
+    })
+    const error = await failureOf(adapter.stream(request({
+      messages: [{ role: 'user', content: heavyHistory(40) }],
+    })))
+    expect(error).toBeInstanceOf(LlmError)
+    expect((error as LlmError).code).toBe('IMAGE_OFFLOAD_REQUIRED')
+    expect((error as LlmError).failure.offloadImages).toBeGreaterThan(0)
+    // Nothing was sent: a request the gateway would answer 413 with should never
+    // reach the network, because the 413 names no threshold a caller can act on.
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('sends a history that fits', async () => {
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => 'data:image/png;base64,AAAA',
+    })
+    await collect(adapter.stream(request({
+      messages: [{ role: 'user', content: heavyHistory(2) }],
+    })))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not fail a request whose oversized images are already offloaded', async () => {
+    // The retry after an offload event carries the same history with the marks
+    // set. Counting them again would fail the retry with the same demand, which
+    // is an offload loop rather than a fix.
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => 'data:image/png;base64,AAAA',
+    })
+    const offloaded = heavyHistory(40).map((block) => (
+      block.type === 'image' ? { ...block, offloaded: true as const } : block
+    ))
+    await collect(adapter.stream(request({
+      messages: [{ role: 'user', content: offloaded }],
+    })))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('OpenDesignAdapter image generation', () => {
+  /** A configuration whose catalog marks one model as image-generating. */
+  const IMAGE_CONFIG: OpenDesignConfig = {
+    ...CONFIG,
+    catalogJson: JSON.stringify({
+      source: 'gateway',
+      ids: ['deepseek-v4.1-flash', 'seedream-5.0'],
+      imageIds: ['seedream-5.0'],
+    }),
+  }
+
+  /** A one-pixel PNG, base64-encoded the way the Images endpoint answers. */
+  const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const PNG_B64 = Buffer.from(PNG).toString('base64')
+
+  /** A store double that records what it was asked to keep. */
+  function storeDouble() {
+    const saved: { data: Uint8Array, mediaType: string, name?: string }[] = []
+    return {
+      saved,
+      seam: {
+        saveImage: async (input: { data: Uint8Array, mediaType: string, name?: string }) => {
+          saved.push(input)
+          return {
+            attachmentId: 'sha256:generated',
+            mediaType: input.mediaType,
+            bytes: input.data.byteLength,
+            width: 1024,
+            height: 1024,
+          }
+        },
+      },
+    }
+  }
+
+  /** An adapter whose catalog marks `seedream-5.0` as an image model. */
+  function imageAdapter(seam: ReturnType<typeof storeDouble>['seam'] | undefined) {
+    return new OpenDesignAdapter({
+      config: () => IMAGE_CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      attachments: () => seam as never,
+    })
+  }
+
+  it('posts the prompt to the images endpoint instead of chat completions', async () => {
+    // This is the reported bug: the model was advertised like a chat model, so
+    // selecting it sent `POST /chat/completions` and every request failed.
+    const fetchMock = stubFetch(json({ data: [{ b64_json: PNG_B64 }] }, 200))
+    const { seam } = storeDouble()
+    await collect(imageAdapter(seam).stream(request({
+      model: 'seedream-5.0',
+      messages: [{ role: 'user', content: [{ type: 'text', text: '一只柴犬' }] }],
+    })))
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://gateway.test/v1/images/generations')
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1].body)) as Record<string, unknown>
+    expect(body.prompt).toBe('一只柴犬')
+    expect(body.model).toBe('seedream-5.0')
+  })
+
+  it('commits the bytes and emits an image block the conversation can render', async () => {
+    // The whole point of the route: a generated picture has to become a durable
+    // image block, or it disappears with the response.
+    const fetchMock = stubFetch(json({ data: [{ b64_json: PNG_B64 }] }, 200))
+    const { seam, saved } = storeDouble()
+    const chunks = await collect(imageAdapter(seam).stream(request({
+      model: 'seedream-5.0',
+      messages: [{ role: 'user', content: [{ type: 'text', text: '一只柴犬' }] }],
+    })))
+    expect(saved).toHaveLength(1)
+    expect(Buffer.from(saved[0]!.data)).toEqual(Buffer.from(PNG))
+    expect(saved[0]!.mediaType).toBe('image/png')
+
+    const imageChunk = chunks.find((chunk) => chunk.type === 'block-end' && chunk.block.type === 'image')
+    expect(imageChunk).toBeDefined()
+    expect((imageChunk as { block: { attachment: { attachmentId: string } } }).block.attachment.attachmentId)
+      .toBe('sha256:generated')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // A stream that ends without a finish is a truncated turn; the harness waits
+    // for it before closing the assistant message.
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+  })
+
+  it('assembles into a durable assistant message carrying the image', async () => {
+    // The chunks are a contract with the harness assembler, not just an
+    // internal shape: if assembly dropped the block the image would render as an
+    // empty assistant turn.
+    stubFetch(json({ data: [{ b64_json: PNG_B64 }] }, 200))
+    const { seam } = storeDouble()
+    const chunks = await collect(imageAdapter(seam).stream(request({
+      model: 'seedream-5.0',
+      messages: [{ role: 'user', content: [{ type: 'text', text: '一只柴犬' }] }],
+    })))
+    const assembler = new BlockAssembler()
+    for (const chunk of chunks) assembler.push(chunk)
+    const blocks = assembler.blocks()
+    expect(blocks.map((block) => block.type)).toEqual(['text', 'image'])
+  })
+
+  it('refuses to generate when the host cannot store the bytes', async () => {
+    // An assistant image block pointing at an attachment the store refused
+    // renders as a broken picture with no explanation; failing first says why.
+    const fetchMock = stubFetch(json({ data: [{ b64_json: PNG_B64 }] }, 200))
+    const error = await failureOf(imageAdapter(undefined).stream(request({
+      model: 'seedream-5.0',
+      messages: [{ role: 'user', content: [{ type: 'text', text: '一只柴犬' }] }],
+    })))
+    expect((error as LlmError).code).toBe('UNSUPPORTED_OPTION')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses a turn that carries no prompt', async () => {
+    // `/images/generations` has no conversation: without an instruction there is
+    // nothing to send, and posting an empty prompt bills for a random picture.
+    const fetchMock = stubFetch(json({ data: [{ b64_json: PNG_B64 }] }, 200))
+    const { seam } = storeDouble()
+    const error = await failureOf(imageAdapter(seam).stream(request({
+      model: 'seedream-5.0',
+      messages: [{ role: 'user', content: [{ type: 'text', text: '   ' }] }],
+    })))
+    expect((error as LlmError).code).toBe('INVALID_REQUEST')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a chat model on chat completions', async () => {
+    // The branch must not swallow the ordinary path: a catalog that marks one
+    // model does not make every model an image model.
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const { seam } = storeDouble()
+    await collect(imageAdapter(seam).stream(request({ model: 'deepseek-v4.1-flash' })))
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://gateway.test/v1/chat/completions')
+  })
+})

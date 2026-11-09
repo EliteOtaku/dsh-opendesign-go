@@ -16,6 +16,7 @@
  */
 import {
   ACCOUNT_QUOTA_EXCEEDED_CODE,
+  IMAGE_OFFLOAD_REQUIRED_CODE,
   INVALID_CREDENTIAL_CODE as INVALID_CREDENTIAL,
   LlmAdapter,
   LlmError,
@@ -36,13 +37,16 @@ import type {
   StreamChunk,
   TokenUsage,
 } from '@deepseek-ai/dsh-llm'
-import { catalogRowsOf, parseCatalog } from './catalog.ts'
+import { catalogRowsOf, isImageModel, parseCatalog } from './catalog.ts'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS, paramsOf } from './model-params.ts'
 import type { ModelParamOverride, ModelParams } from './model-params.ts'
 import { estimatePromptTokens, fitMaxTokens, reservedOutputTokens, usableInputTokens } from './output-budget.ts'
 import { DISPLAY_NAME, type OpenDesignConfig, type ProtocolId } from './config-contract.ts'
 import { toChatMessages, toChatTools } from './conversion.ts'
 import type { ImageDataUrlResolver } from './conversion.ts'
+import { generateImages } from './image-generation.ts'
+import { overBudgetOffloadCount } from './image-request-budget.ts'
+import type { AttachmentsSeam } from './image-bytes.ts'
 import { toResponsesRequest, translateResponsesEvent } from './responses.ts'
 import {
   appendReasoning,
@@ -95,6 +99,15 @@ export interface OpenDesignAdapterOptions {
    * @param call - the model, the account that served it, and its usage.
    */
   onUsage?: (call: { model: string, accountRef: string, usage: TokenUsage }) => void
+  /**
+   * Current attachment store, or undefined when none is mounted.
+   *
+   * Read through a function because the store is injected asynchronously: the
+   * adapter is constructed before `ctx.inject(['attachments'])` settles, so
+   * capturing the store at construction would pin the absent case forever.
+   * @returns the mounted store, or undefined.
+   */
+  attachments?: () => AttachmentsSeam | undefined
   /**
    * Turn one durable image reference into an inline data URL.
    *
@@ -294,6 +307,128 @@ export class OpenDesignAdapter extends LlmAdapter {
     return resolve
   }
 
+  /**
+   * Whether this model answers with an image instead of text.
+   *
+   * Two sources agree here: the catalog snapshot, which is what the gateway
+   * declared, and the known-id table, which covers ids the snapshot has not
+   * seen. The snapshot wins when it carries the id, because a declared output
+   * modality is authoritative — an entry that says `["text"]` is a chat model
+   * even if its name looks generative.
+   * @param model - exact model id from the request.
+   * @returns true when the request belongs on the Images endpoint.
+   */
+  #isImageModel(model: string): boolean {
+    const rows = catalogRowsOf(parseCatalog(this.#options.config().catalogJson))
+    const row = rows.find((entry) => entry.id === model)
+    if (row !== undefined) return row.imageGeneration === true
+    // Outside the snapshot the id is still routable, so the known-id table
+    // decides; treating an unknown id as a chat model keeps the default path.
+    return isImageModel(model)
+  }
+
+  /**
+   * Serve one image-generation model.
+   *
+   * The Images endpoint is not a stream, so the whole result arrives at once and
+   * is then emitted as an ordinary block stream: a text block naming the prompt,
+   * one block per generated image, usage, and the terminal finish. The image
+   * blocks carry durable references, so the conversation renders them through
+   * the same gallery as an upload and they survive a restart.
+   *
+   * Bytes that cannot be committed are a failure, not a partial success: an
+   * assistant message pointing at an attachment the store refused would render
+   * as a broken image with no explanation.
+   * @param options - request carrying the prompt and selection.
+   * @param config - configuration snapshot with the endpoint and deadline.
+   * @param candidates - credential references to try in order.
+   * @yields the block stream for one image reply.
+   * @throws LlmError - `UNSUPPORTED_OPTION` when the host cannot store images,
+   * `INVALID_REQUEST` when the turn carries no prompt, or a classified gateway
+   * failure.
+   */
+  async *#generateImage(
+    options: GenerateOptions,
+    config: OpenDesignConfig,
+    candidates: readonly string[],
+  ): AsyncIterable<StreamChunk> {
+    const store = this.#options.attachments?.()
+    if (store?.saveImage === undefined) {
+      throw new LlmError(
+        'OpenDesign: this host has no attachment store, so a generated image could not be kept',
+        GATEWAY_CODES.unsupported,
+      )
+    }
+    const prompt = promptOf(options)
+    if (prompt.length === 0) {
+      throw new LlmError(
+        `OpenDesign: ${options.model} generates images from a prompt, and this turn carried none`,
+        GATEWAY_CODES.invalidRequest,
+      )
+    }
+    const baseURL = config.baseURL.replace(/\/+$/u, '')
+    if (baseURL === '') throw new LlmError('OpenDesign: baseURL is not configured', GATEWAY_CODES.invalidRequest)
+
+    let lastFailure: unknown
+    for (const ref of candidates) {
+      const apiKey = await this.#apiKey(ref)
+      try {
+        const images = await generateImages({
+          model: options.model,
+          prompt,
+          url: `${baseURL}/images/generations`,
+          apiKey,
+          signal: deadlineSignal(options.signal, config.requestTimeoutMs) ?? new AbortController().signal,
+        })
+
+        let index = 0
+        const note = images.length === 1
+          ? `已生成 1 张图片（${options.model}）。`
+          : `已生成 ${images.length} 张图片（${options.model}）。`
+        yield { type: 'block-start', index, blockType: 'text' }
+        yield { type: 'text-delta', index, text: note }
+        yield { type: 'block-end', index, block: { type: 'text', text: note } }
+        index += 1
+
+        for (const image of images) {
+          const saved = await store.saveImage({
+            data: image.data,
+            mediaType: image.mediaType,
+            name: `${options.model}.${extensionOf(image.mediaType)}`,
+          })
+          const block = {
+            type: 'image' as const,
+            attachment: {
+              attachmentId: saved.attachmentId,
+              mediaType: saved.mediaType,
+              bytes: saved.bytes,
+              width: saved.width,
+              height: saved.height,
+            },
+          }
+          // The block is emitted whole: an image has no deltas, and the harness
+          // assembler takes the committed block verbatim.
+          yield { type: 'block-start', index, blockType: 'image' }
+          yield { type: 'block-end', index, block: block as never }
+          index += 1
+        }
+
+        // The Images endpoint reports no token usage, and inventing a number
+        // would price a call the ledger cannot verify; the account is still
+        // promoted, because output did arrive.
+        this.#options.onAccountSettled?.(ref)
+        yield { type: 'finish', reason: { kind: 'stop' } }
+        return
+      } catch (error) {
+        lastFailure = error
+        if (config.autoSwitch && isRetryableAccountFailure(error)
+          && candidates.indexOf(ref) < candidates.length - 1) continue
+        throw error
+      }
+    }
+    throw lastFailure ?? new LlmError('OpenDesign: no usable account', MISSING_CREDENTIAL)
+  }
+
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const config = this.#options.config()
     // Account fallback is decided once, from the same configuration snapshot
@@ -301,10 +436,40 @@ export class OpenDesignAdapter extends LlmAdapter {
     // list in order when auto-switch is on. Nothing re-reads the list mid-call,
     // so a settings edit cannot change the roster between attempts.
     const candidates = config.autoSwitch ? accountsOf(config).map((account) => account.apiKeyEnv) : [config.apiKeyEnv]
+    // A model the catalog marked as image-generating is served by the Images
+    // endpoint, not by Chat Completions. This branch is what makes those models
+    // usable: before it existed they were advertised like chat models and every
+    // request to them failed at the gateway.
+    if (this.#isImageModel(options.model)) {
+      yield* this.#generateImage(options, config, candidates)
+      return
+    }
+    // Chat Completions carries images inline and this route has no Files upload,
+    // so every image in the history is re-sent at its base64 length on every
+    // request. Past the budget the gateway's proxy answers 413 with an HTML body
+    // that names nothing, and the failure looks like a broken model. Failing
+    // here instead lets the harness offload the oldest images and retry; dropping
+    // them silently would leave the session log claiming bytes never sent.
+    //
+    // Only a route that actually sends the bytes is measured: on a text-only
+    // model every image already projects to placeholder text, so charging it
+    // against this budget would demand an offload that frees nothing.
+    const resolver = this.#imageResolverFor(options.model)
+    if (resolver !== undefined) {
+      const overBudget = overBudgetOffloadCount(options.messages)
+      if (overBudget > 0) {
+        throw new LlmError(
+          `OpenDesign: this request carries more inline image bytes than the route allows; `
+          + `${overBudget} of the oldest images must be offloaded before it can be sent`,
+          IMAGE_OFFLOAD_REQUIRED_CODE,
+          { offloadImages: overBudget },
+        )
+      }
+    }
     let lastFailure: unknown
     for (const ref of candidates) {
       const apiKey = await this.#apiKey(ref)
-      const response = await dispatch(options, config, apiKey, this.#imageResolverFor(options.model))
+      const response = await dispatch(options, config, apiKey, resolver)
       if (!response.ok) {
         lastFailure = classifyGatewayFailure(await readFailure(response))
         // Only a rejected credential or exhausted quota justifies trying the
@@ -348,6 +513,46 @@ export class OpenDesignAdapter extends LlmAdapter {
       )
     }
     return assertUsableApiKey(raw, PACKAGE_NAME, ref)
+  }
+}
+
+/**
+ * Collect the prompt an image request should carry.
+ *
+ * An image model takes one instruction, not a conversation, so only the visible
+ * text of the latest user turn is used. Including earlier turns would append
+ * history the model cannot read as history and would quietly change the picture
+ * being asked for. Image and tool blocks contribute nothing: their bytes are
+ * inputs this route cannot forward to `/images/generations`.
+ * @param options - fully assembled request.
+ * @returns the instruction text, empty when the turn carried none.
+ */
+function promptOf(options: GenerateOptions): string {
+  for (let index = options.messages.length - 1; index >= 0; index -= 1) {
+    const message = options.messages[index]
+    if (message === undefined || message.role !== 'user') continue
+    const parts: string[] = []
+    for (const block of message.content) {
+      if (block.type === 'text' && block.text.trim() !== '') parts.push(block.text.trim())
+    }
+    // `options.system` is a one-shot caller's system prompt; an image model has
+    // no system slot, so it is not merged into the instruction.
+    return parts.join('\n')
+  }
+  return ''
+}
+
+/**
+ * File extension for one accepted media type.
+ * @param mediaType - verified image media type.
+ * @returns the extension to name the stored object with.
+ */
+function extensionOf(mediaType: string): string {
+  switch (mediaType) {
+    case 'image/jpeg': return 'jpg'
+    case 'image/webp': return 'webp'
+    case 'image/gif': return 'gif'
+    default: return 'png'
   }
 }
 
