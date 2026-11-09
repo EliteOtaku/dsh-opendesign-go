@@ -13,8 +13,29 @@ describe('parseCatalog', () => {
       asOf: '2026-11-09T06:50:00.000Z',
       source: 'gateway',
       ids: ['deepseek-v4.1-flash', 'claude-sonnet-5.5'],
+      imageIds: [],
       error: undefined,
     })
+  })
+
+  it('keeps the image models apart from the chat models', () => {
+    // Sending either kind to the other's endpoint fails, so the split is what
+    // makes an entitled generation model usable at all.
+    const raw = JSON.stringify({ ...SNAPSHOT, ids: ['gpt-6-luna', 'seedream-5.0'], imageIds: ['seedream-5.0'] })
+    const snapshot = parseCatalog(raw)
+    expect(snapshot?.ids).toEqual(['gpt-6-luna', 'seedream-5.0'])
+    expect(snapshot?.imageIds).toEqual(['seedream-5.0'])
+    expect(catalogRowsOf(snapshot)).toEqual([
+      { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
+      { id: 'seedream-5.0', name: 'Seedream 5.0', imageGeneration: true },
+    ])
+  })
+
+  it('drops an image id the snapshot no longer carries', () => {
+    // The two lists are written together; a stale entry naming a model the
+    // account lost must not resurrect it as an image row.
+    const raw = JSON.stringify({ ...SNAPSHOT, ids: ['gpt-6-luna'], imageIds: ['seedream-5.0'] })
+    expect(parseCatalog(raw)?.imageIds).toEqual([])
   })
 
   it('keeps the reason a fallback snapshot was written', () => {

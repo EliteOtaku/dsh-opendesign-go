@@ -1,13 +1,16 @@
 /**
  * Model catalog for the OpenDesign Go plan.
  *
- * M2 ships a static seed so the adapter has models to resolve before the live
- * catalog exists. M3 replaces the seed with `/v1/models` (entitlement-aware)
- * merged with the public `model-prices` endpoint, keeping this module as the
- * merge point so callers never depend on where a row came from.
+ * `GET {baseURL}/models` answers per entitlement and mixes two kinds of model in
+ * one list: chat models, which this route answers with `POST /chat/completions`,
+ * and image-generation models, which that endpoint rejects and only
+ * `POST /images/generations` serves. An id list alone therefore cannot say which
+ * request to send, and treating every id as a chat model is what made a
+ * generation model fail the moment it was selected.
  *
- * The fourteen ids below are the Design Plan models the Go plan grants. Go does
- * not include the package-model allowance, so nothing else is advertised.
+ * So a snapshot keeps both kinds apart — and keeps both. Dropping the image ids
+ * would make an entitled model invisible, which reads as a missing feature
+ * rather than a limit, and the account pays for them either way.
  *
  * @module dsh-opendesign-go/catalog
  */
@@ -21,6 +24,14 @@ export interface CatalogModel {
   readonly id: string
   /** Human-readable name for selectors. */
   readonly name: string
+  /**
+   * Whether this model answers with an image instead of text.
+   *
+   * The harness model vocabulary has no output-modality field, so this travels
+   * on the catalog row instead. It decides the endpoint, not the visibility:
+   * both kinds stay selectable.
+   */
+  readonly imageGeneration?: true
 }
 
 /**
@@ -47,6 +58,25 @@ export const GO_DESIGN_PLAN_MODELS: readonly CatalogModel[] = [
   { id: 'mimo-v2.6-pro', name: 'MiMo V2.6 Pro' },
   { id: 'minimax-m3.1-flash', name: 'MiniMax M3.1 Flash' },
   { id: 'hy4-preview', name: 'Hunyuan H4 Preview' },
+]
+
+/**
+ * Ids known to produce images, used when the catalog declares no output
+ * modalities.
+ *
+ * A declared modality always wins, in both directions: an entry that says
+ * `["text"]` is a chat model even if its id looks generative, and one that omits
+ * `text` is not a chat model whatever it is called. This table only decides
+ * entries the gateway left undescribed, because guessing from silence in the
+ * other direction would misroute working chat models.
+ */
+const KNOWN_IMAGE_MODEL_IDS: readonly string[] = [
+  'gpt-image-2',
+  'gpt-image-2.6-flare',
+  'nano-banana-2',
+  'nano-banana-2-lite',
+  'seedream-5.0',
+  'seedream-5.0-pro',
 ]
 
 /**
@@ -93,6 +123,14 @@ export interface CatalogSnapshot {
   readonly source: CatalogSource
   /** Model ids in display order. Empty is a real answer, not a missing one. */
   readonly ids: readonly string[]
+  /**
+   * Ids among {@link ids} that answer with an image.
+   *
+   * A snapshot written before this field existed reads as "none identified",
+   * so an old cache keeps its previous behaviour instead of silently
+   * reclassifying half the catalog.
+   */
+  readonly imageIds: readonly string[]
   /** Why the bundled list was used, when it was. */
   readonly error: string | undefined
 }
@@ -112,6 +150,10 @@ const NAME_FIXES: Readonly<Record<string, string>> = Object.freeze({
   qwen: 'Qwen',
   hy: 'Hunyuan',
   seed: 'Seedream',
+  nano: 'Nano',
+  banana: 'Banana',
+  image: 'Image',
+  seedream: 'Seedream',
 })
 
 /**
@@ -159,11 +201,18 @@ export function parseCatalog(raw: string | undefined): CatalogSnapshot | undefin
   const ids = row.ids
   if (!Array.isArray(ids)) return undefined
   const clean = ids.filter((id): id is string => typeof id === 'string' && id.length > 0)
+  const rawImages = row.imageIds
+  // Only ids the snapshot actually carries count: a stale imageIds entry for a
+  // model the account no longer has must not resurrect it.
+  const images = Array.isArray(rawImages)
+    ? rawImages.filter((id): id is string => typeof id === 'string' && clean.includes(id))
+    : []
   const source: CatalogSource = row.source === 'fallback' ? 'fallback' : 'gateway'
   return {
     asOf: typeof row.asOf === 'string' && row.asOf.length > 0 ? row.asOf : undefined,
     source,
     ids: clean,
+    imageIds: images,
     error: typeof row.error === 'string' && row.error.length > 0 ? row.error : undefined,
   }
 }
@@ -175,11 +224,31 @@ export function parseCatalog(raw: string | undefined): CatalogSnapshot | undefin
  * in; an *empty* snapshot means the account grants nothing, and substituting the
  * bundled list there would advertise models the account cannot call.
  * @param snapshot - parsed snapshot, or undefined when none was ever written.
- * @returns rows in display order.
+ * @returns rows in display order, image models marked.
  */
 export function catalogRowsOf(snapshot: CatalogSnapshot | undefined): readonly CatalogModel[] {
   if (snapshot === undefined) return GO_DESIGN_PLAN_MODELS
-  return snapshot.ids.map((id) => ({ id, name: displayNameOf(id) }))
+  const images = new Set(snapshot.imageIds)
+  return snapshot.ids.map((id) => {
+    const row: CatalogModel = { id, name: displayNameOf(id) }
+    return images.has(id) ? { ...row, imageGeneration: true } : row
+  })
+}
+
+/**
+ * Whether one catalog entry answers with an image rather than text.
+ *
+ * A declared output modality is authoritative in both directions; only when the
+ * gateway declares nothing does the known-id table decide.
+ * @param id - model id from the catalog.
+ * @param outputModalities - modalities the catalog declared, or undefined.
+ * @returns true when this entry must be sent to the image endpoint.
+ */
+export function isImageModel(id: string, outputModalities?: readonly string[]): boolean {
+  if (outputModalities !== undefined && outputModalities.length > 0) {
+    return !outputModalities.includes('text')
+  }
+  return KNOWN_IMAGE_MODEL_IDS.includes(id)
 }
 
 /** Route this catalog belongs to. */
