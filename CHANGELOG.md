@@ -28,6 +28,8 @@
 
 现在目录快照多记一个 `imageIds`，标出哪些 id 是生图模型；它们由 `opendesign_generate_image` 工具调用，改走 `POST /images/generations`，返回的 base64 经 `attachments.saveImage` 落成持久引用，**作为工具结果**回到会话。所以生成的图能被后续对话继续读取，重启也还在。
 
+同时它们不再出现在会话的模型选择器里（`listModels` 过滤掉）：生图没有文本可流式返回，选中它根本没有可发的一轮。设置页读的是目录而不是这个列表，所以照样列出它们并标注「生图模型」，订阅里这部分额度仍然看得见。
+
 做成工具而不是贴进 assistant 消息，是因为三条都要求如此：`dsh-llm-deepseek` 与 `dsh-llm-pi-ai` 都把 assistant 图片判为 `UNSUPPORTED_CONTENT`；宿主的 `dsh-compaction-image-offload` 只扫 `user/message` 与 `tool/result`，assistant 的图永远选不中；而被计入预算又无法 offload 的图会让会话卡在一个修不好的状态里。工具结果三条都满足 —— 模型看得到图，会话重了能 offload，画廊照常渲染。
 
 设置页给这些行加了「生图模型」标注，并隐藏上下文/输出上限与「改参数」——它们没有这些参数。分类规则是：目录声明了 `output_modalities` 就以声明为准（双向有效），只有什么都没说时才查已知生图 id 表。

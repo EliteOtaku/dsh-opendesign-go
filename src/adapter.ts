@@ -1,4 +1,4 @@
-﻿/**
+/**
  * OpenDesign inference adapter.
  *
  * One streaming call per request. The harness vocabulary is projected by
@@ -244,7 +244,15 @@ export class OpenDesignAdapter extends LlmAdapter {
     const rows = catalogRowsOf(parseCatalog(config.catalogJson))
     const enabled = config.enabledModels ?? []
     const visible = enabled.length === 0 ? rows : rows.filter((row) => enabled.includes(row.id))
-    return visible.map((row) => projectRow(provider, row, config.modelParams))
+    // Generation models are not offered as a conversation route. They answer with
+    // a picture and no text, so a turn cannot be sent to one at all — offering
+    // them here only produced the reported "select it and every request fails".
+    // They stay fully usable through the generation tool, and the settings page
+    // still lists them (it reads the catalog, not this snapshot), so the part of
+    // the subscription they account for stays visible.
+    return visible
+      .filter((row) => row.imageGeneration !== true)
+      .map((row) => projectRow(provider, row, config.modelParams))
   }
 
   /**

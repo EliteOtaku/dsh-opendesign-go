@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Adapter contract tests: the M2 wire mapping is exercised against a stubbed
  * global `fetch` that returns canned SSE bodies, so no gateway is contacted.
  */
@@ -1005,5 +1005,28 @@ describe('OpenDesignAdapter image generation', () => {
     ]))
     await collect(imageAdapter().stream(request({ model: 'deepseek-v4.1-flash' })))
     expect(fetchMock.mock.calls[0]![0]).toBe('https://gateway.test/v1/chat/completions')
+  })
+})
+
+describe('OpenDesignAdapter model list', () => {
+  it('keeps generation models out of the conversation picker', async () => {
+    // A generation model answers with a picture and no text, so a conversation
+    // turn cannot be routed to one at all. Offering it in the picker only produced
+    // the reported "select it and every request fails"; it stays usable through
+    // `opendesign_generate_image`, and the settings page still lists it because it
+    // reads the catalog rather than this snapshot.
+    const adapter = new OpenDesignAdapter({
+      config: () => ({
+        ...CONFIG,
+        catalogJson: JSON.stringify({
+          source: 'gateway',
+          ids: ['deepseek-v4.1-flash', 'seedream-5.0'],
+          imageIds: ['seedream-5.0'],
+        }),
+      }),
+      resolveApiKey: async () => 'sk-test',
+    })
+    const ids = (await adapter.listModels('dsh-opendesign-go')).map((model) => model.id)
+    expect(ids).toEqual(['deepseek-v4.1-flash'])
   })
 })
