@@ -1,4 +1,4 @@
-/**
+﻿/**
  * OpenDesign inference adapter.
  *
  * One streaming call per request. The harness vocabulary is projected by
@@ -31,6 +31,7 @@ import { accountsOf } from './accounts.ts'
 import type {
   FinishReason,
   GenerateOptions,
+  ImageBlock,
   LlmModelInfo,
   LlmProviderInfo,
   LlmResolvedModelInfo,
@@ -44,8 +45,14 @@ import { estimatePromptTokens, fitMaxTokens, reservedOutputTokens, usableInputTo
 import { DISPLAY_NAME, type OpenDesignConfig, type ProtocolId } from './config-contract.ts'
 import { toChatMessages, toChatTools } from './conversion.ts'
 import type { ImageDataUrlResolver } from './conversion.ts'
-import { generateImages } from './image-generation.ts'
-import { overBudgetOffloadCount } from './image-request-budget.ts'
+import { IMAGE_TOOL_NAME } from './image-tool.ts'
+import { planImageOffload, inlineBytesOf } from './image-request-budget.ts'
+import {
+  DEFAULT_REQUEST_IMAGE_POLICY,
+  prepareRequestImages,
+  requestImageTarget,
+} from './request-images.ts'
+import type { PreparedImageIndex, RequestImagePolicy } from './request-images.ts'
 import type { AttachmentsSeam } from './image-bytes.ts'
 import { toResponsesRequest, translateResponsesEvent } from './responses.ts'
 import {
@@ -115,10 +122,29 @@ export interface OpenDesignAdapterOptions {
    * to the harness placeholder text instead of bytes. The resolver is asked only
    * for models whose catalog entry declares the image modality, so a text-only
    * model never receives image bytes.
+   *
+   * Used as the fallback when the store has no request-version path: the adapter
+   * prefers `readImageRequest` through {@link attachments}, which is what keeps a
+   * large screenshot from being re-sent at its upload size forever.
    * @param attachment - the durable reference carried by an image block.
    * @returns a `data:` URL, or undefined when the bytes are not readable.
    */
   imageDataUrl?: (attachment: unknown) => string | undefined
+  /**
+   * Dimensions and byte ceiling request images are derived at.
+   *
+   * Defaults to {@link DEFAULT_REQUEST_IMAGE_POLICY}, the same 4 Mpx / 1 MiB
+   * policy the bundled DeepSeek and pi-ai adapters use.
+   */
+  requestImagePolicy?: RequestImagePolicy
+  /**
+   * Sink for image projection failures.
+   *
+   * A picture that cannot be derived is not worth failing a request over, but it
+   * must not vanish silently either.
+   * @param message - what could not be done.
+   */
+  warn?: (message: string) => void
 }
 
 /**
@@ -308,6 +334,49 @@ export class OpenDesignAdapter extends LlmAdapter {
   }
 
   /**
+   * The dimensions and byte ceiling this route derives request images at.
+   *
+   * The harness calls this before serialization and hands the answer straight to
+   * `attachments.readImageRequest`, so declaring it is what makes an image cost
+   * the same here as on a bundled adapter. The default implementation returns the
+   * stored dimensions unchanged, which is why every image used to be re-sent at
+   * whatever size it was uploaded — the exact cause of the 413.
+   * @param _provider - registered provider route.
+   * @param _model - exact model id.
+   * @param image - normalized image whose request projection is being resolved.
+   * @returns the target used by request serialization.
+   */
+  imageRequestTarget(_provider: string, _model: string, image: ImageBlock['attachment']): {
+    width: number
+    height: number
+    maxBytes: number
+  } {
+    return requestImageTarget(image, this.#options.requestImagePolicy ?? DEFAULT_REQUEST_IMAGE_POLICY)
+  }
+
+  /**
+   * Derive every image this request will send.
+   *
+   * Cached per call, not across calls: the store already caches derived versions
+   * by (attachment, policy), and a per-request map would go stale the moment the
+   * route changed.
+   * @param options - the request being assembled.
+   * @returns the projected images, keyed by attachment id.
+   */
+  async #prepareImages(options: GenerateOptions): Promise<PreparedImageIndex | undefined> {
+    const store = this.#options.attachments?.()
+    if (store === undefined) return undefined
+    const warn = this.#options.warn ?? (() => {})
+    return await prepareRequestImages(
+      options.messages,
+      store,
+      warn,
+      options.signal,
+      this.#options.requestImagePolicy ?? DEFAULT_REQUEST_IMAGE_POLICY,
+    )
+  }
+
+  /**
    * Whether this model answers with an image instead of text.
    *
    * Two sources agree here: the catalog snapshot, which is what the gateway
@@ -328,105 +397,27 @@ export class OpenDesignAdapter extends LlmAdapter {
   }
 
   /**
-   * Serve one image-generation model.
+   * Refuse one generation model's chat request with the reason it cannot work.
    *
-   * The Images endpoint is not a stream, so the whole result arrives at once and
-   * is then emitted as an ordinary block stream: a text block naming how many
-   * pictures arrived, one block per generated image, and the terminal finish.
-   * The image blocks carry durable references, so the conversation renders them
-   * through the same gallery as an upload and they survive a restart.
+   * A generation model is not a chat model: the only surface that serves it is
+   * `POST /images/generations`, which answers with pictures and no text, so there
+   * is no reply to stream into a conversation turn. Generation is served by the
+   * `opendesign_generate_image` tool instead, whose result is a tool result — the
+   * one shape the harness carries a generated picture through.
    *
-   * Bytes that cannot be committed are a failure, not a partial success: an
-   * assistant message pointing at an attachment the store refused would render
-   * as a broken image with no explanation.
-   * @param options - request carrying the prompt and selection.
-   * @param config - configuration snapshot with the endpoint and deadline.
-   * @param candidates - credential references to try in order.
-   * @yields the block stream for one image reply.
-   * @throws LlmError - `UNSUPPORTED_OPTION` when the host cannot store images,
-   * `INVALID_REQUEST` when the turn carries no prompt, or a classified gateway
-   * failure.
+   * The branch exists rather than falling through because the alternative is a
+   * confusing gateway error about an unknown model. Naming the tool is the whole
+   * fix from the caller's side.
+   * @param options - request that selected a generation model.
+   * @throws LlmError - `INVALID_REQUEST`, naming the tool to call instead.
    */
-  async *#generateImage(
-    options: GenerateOptions,
-    config: OpenDesignConfig,
-    candidates: readonly string[],
-  ): AsyncIterable<StreamChunk> {
-    const store = this.#options.attachments?.()
-    if (store?.saveImage === undefined) {
-      throw new LlmError(
-        'OpenDesign: this host has no attachment store, so a generated image could not be kept',
-        GATEWAY_CODES.unsupported,
-      )
-    }
-    const prompt = promptOf(options)
-    if (prompt.length === 0) {
-      throw new LlmError(
-        `OpenDesign: ${options.model} generates images from a prompt, and this turn carried none`,
-        GATEWAY_CODES.invalidRequest,
-      )
-    }
-    const baseURL = config.baseURL.replace(/\/+$/u, '')
-    if (baseURL === '') throw new LlmError('OpenDesign: baseURL is not configured', GATEWAY_CODES.invalidRequest)
-
-    let lastFailure: unknown
-    for (const ref of candidates) {
-      const apiKey = await this.#apiKey(ref)
-      try {
-        const images = await generateImages({
-          model: options.model,
-          prompt,
-          url: `${baseURL}/images/generations`,
-          apiKey,
-          signal: deadlineSignal(options.signal, config.requestTimeoutMs) ?? new AbortController().signal,
-        })
-
-        let index = 0
-        const note = images.length === 1
-          ? `已生成 1 张图片（${options.model}）。`
-          : `已生成 ${images.length} 张图片（${options.model}）。`
-        yield { type: 'block-start', index, blockType: 'text' }
-        yield { type: 'text-delta', index, text: note }
-        yield { type: 'block-end', index, block: { type: 'text', text: note } }
-        index += 1
-
-        for (const image of images) {
-          const saved = await store.saveImage({
-            data: image.data,
-            mediaType: image.mediaType,
-            name: `${options.model}.${extensionOf(image.mediaType)}`,
-          })
-          const block = {
-            type: 'image' as const,
-            attachment: {
-              attachmentId: saved.attachmentId,
-              mediaType: saved.mediaType,
-              bytes: saved.bytes,
-              width: saved.width,
-              height: saved.height,
-            },
-          }
-          // The block is emitted whole: an image has no deltas, and the harness
-          // assembler takes the committed block verbatim.
-          yield { type: 'block-start', index, blockType: 'image' }
-          yield { type: 'block-end', index, block: block as never }
-          index += 1
-        }
-
-        // The Images endpoint reports no token usage, and inventing a number
-        // would price a call the ledger cannot verify; the account is still
-        // promoted, because output did arrive.
-        this.#options.onAccountSettled?.(ref)
-        yield { type: 'finish', reason: { kind: 'stop' } }
-        return
-      } catch (error) {
-        lastFailure = error
-        if (config.autoSwitch && isRetryableAccountFailure(error)
-          && candidates.indexOf(ref) < candidates.length - 1) continue
-        throw error
-      }
-    }
-    throw lastFailure ?? new LlmError('OpenDesign: no usable account', MISSING_CREDENTIAL)
+  #refuseGenerationModel(options: GenerateOptions): never {
+    throw new LlmError(
+      `OpenDesign: ${options.model} generates pictures rather than chat text, so it cannot be the model of a `
+      + `conversation turn. Ask an ordinary model to call the ${IMAGE_TOOL_NAME} tool instead, which runs `
+      + `${options.model} and returns the picture as a tool result.`,
+      GATEWAY_CODES.invalidRequest,
+    )
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -436,40 +427,48 @@ export class OpenDesignAdapter extends LlmAdapter {
     // list in order when auto-switch is on. Nothing re-reads the list mid-call,
     // so a settings edit cannot change the roster between attempts.
     const candidates = config.autoSwitch ? accountsOf(config).map((account) => account.apiKeyEnv) : [config.apiKeyEnv]
-    // A model the catalog marked as image-generating is served by the Images
-    // endpoint, not by Chat Completions. This branch is what makes those models
-    // usable: before it existed they were advertised like chat models and every
-    // request to them failed at the gateway.
-    if (this.#isImageModel(options.model)) {
-      yield* this.#generateImage(options, config, candidates)
-      return
-    }
+    // A model the catalog marked as image-generating answers with a picture and
+    // no text, so it cannot be the route of a conversation turn. It is served by
+    // the generation tool instead (see `image-tool.ts`), and this branch says so
+    // rather than letting the gateway report an unknown model.
+    if (this.#isImageModel(options.model)) this.#refuseGenerationModel(options)
     // Chat Completions carries images inline and this route has no Files upload,
-    // so every image in the history is re-sent at its base64 length on every
-    // request. Past the budget the gateway's proxy answers 413 with an HTML body
-    // that names nothing, and the failure looks like a broken model. Failing
-    // here instead lets the harness offload the oldest images and retry; dropping
-    // them silently would leave the session log claiming bytes never sent.
+    // so every image in the history is re-sent on every request. Two things keep
+    // that bounded, in this order:
+    //
+    // 1. Derive each image at the route's declared target, exactly as the bundled
+    //    adapters do. This is the fix for the size itself: an uploaded 3000x2000
+    //    screenshot costs what a 2048x2048 request version costs, not its upload
+    //    size. Measured on the session behind the 413 report, projection takes
+    //    the body from 55.06 MB to 30.48 MB on its own.
+    // 2. Bound what projection could not fix, through the harness's
+    //    `IMAGE_OFFLOAD_REQUIRED` contract. Past the budget the gateway's proxy
+    //    answers 413 with an HTML body that names nothing, and the failure looks
+    //    like a broken model. Failing here instead lets the host offload the
+    //    oldest images and retry; dropping them silently would leave the session
+    //    log claiming bytes never sent.
     //
     // Only a route that actually sends the bytes is measured: on a text-only
     // model every image already projects to placeholder text, so charging it
     // against this budget would demand an offload that frees nothing.
+    let prepared: PreparedImageIndex | undefined
     const resolver = this.#imageResolverFor(options.model)
     if (resolver !== undefined) {
-      const overBudget = overBudgetOffloadCount(options.messages)
-      if (overBudget > 0) {
+      prepared = await this.#prepareImages(options)
+      const offload = planImageOffload(options.messages, preparedBytesOf(prepared))
+      if (offload > 0) {
         throw new LlmError(
           `OpenDesign: this request carries more inline image bytes than the route allows; `
-          + `${overBudget} of the oldest images must be offloaded before it can be sent`,
+          + `${offload} of the oldest images must be offloaded before it can be sent`,
           IMAGE_OFFLOAD_REQUIRED_CODE,
-          { offloadImages: overBudget },
+          { offloadImages: offload },
         )
       }
     }
     let lastFailure: unknown
     for (const ref of candidates) {
       const apiKey = await this.#apiKey(ref)
-      const response = await dispatch(options, config, apiKey, resolver)
+      const response = await dispatch(options, config, apiKey, resolver, prepared)
       if (!response.ok) {
         lastFailure = classifyGatewayFailure(await readFailure(response))
         // Only a rejected credential or exhausted quota justifies trying the
@@ -516,45 +515,6 @@ export class OpenDesignAdapter extends LlmAdapter {
   }
 }
 
-/**
- * Collect the prompt an image request should carry.
- *
- * An image model takes one instruction, not a conversation, so only the visible
- * text of the latest user turn is used. Including earlier turns would append
- * history the model cannot read as history and would quietly change the picture
- * being asked for. Image and tool blocks contribute nothing: their bytes are
- * inputs this route cannot forward to `/images/generations`.
- * @param options - fully assembled request.
- * @returns the instruction text, empty when the turn carried none.
- */
-function promptOf(options: GenerateOptions): string {
-  for (let index = options.messages.length - 1; index >= 0; index -= 1) {
-    const message = options.messages[index]
-    if (message === undefined || message.role !== 'user') continue
-    const parts: string[] = []
-    for (const block of message.content) {
-      if (block.type === 'text' && block.text.trim() !== '') parts.push(block.text.trim())
-    }
-    // `options.system` is a one-shot caller's system prompt; an image model has
-    // no system slot, so it is not merged into the instruction.
-    return parts.join('\n')
-  }
-  return ''
-}
-
-/**
- * File extension for one accepted media type.
- * @param mediaType - verified image media type.
- * @returns the extension to name the stored object with.
- */
-function extensionOf(mediaType: string): string {
-  switch (mediaType) {
-    case 'image/jpeg': return 'jpg'
-    case 'image/webp': return 'webp'
-    case 'image/gif': return 'gif'
-    default: return 'png'
-  }
-}
 
 /**
  * Whether a failure justifies trying the next account.
@@ -574,6 +534,7 @@ export function isRetryableAccountFailure(failure: unknown): boolean {
  * @param config - configuration snapshot supplying the endpoint and protocol.
  * @param apiKey - validated credential.
  * @param resolver - image resolver for models that accept images.
+ * @param prepared - images already derived at this route's request target.
  * @returns the raw HTTP response, whatever its status.
  * @throws LlmError - `INVALID_REQUEST` when no endpoint is configured, or
  * `SERVER` for a transport failure that is not cancellation.
@@ -583,6 +544,7 @@ async function dispatch(
   config: OpenDesignConfig,
   apiKey: string,
   resolver: ImageDataUrlResolver | undefined,
+  prepared: PreparedImageIndex | undefined,
 ): Promise<Response> {
   const baseURL = config.baseURL.replace(/\/+$/u, '')
   if (baseURL === '') throw new LlmError('OpenDesign: baseURL is not configured', GATEWAY_CODES.invalidRequest)
@@ -596,11 +558,54 @@ async function dispatch(
 
   const signal = deadlineSignal(options.signal, config.requestTimeoutMs)
   const url = `${baseURL}/${config.protocol === 'responses' ? 'responses' : 'chat/completions'}`
+  const imageResolver = resolverOf(prepared, resolver)
   const body = config.protocol === 'responses'
-    ? chatBodyForResponses(options, config, resolver)
-    : chatBody(options, config, resolver)
+    ? chatBodyForResponses(options, config, imageResolver)
+    : chatBody(options, config, imageResolver)
 
   return await send(url, header, body, signal, config, options)
+}
+
+/**
+ * Prefer a derived request image over the stored object.
+ *
+ * The derived index is what carries the downscale; the raw resolver stays as the
+ * fallback for an attachment the store could not derive, so one unreadable format
+ * does not remove every picture from the request.
+ * @param prepared - images derived at this route's target, when the store has the path.
+ * @param fallback - resolver reading the stored object unchanged.
+ * @returns the resolver the projection should use, or undefined for a text route.
+ */
+function resolverOf(
+  prepared: PreparedImageIndex | undefined,
+  fallback: ImageDataUrlResolver | undefined,
+): ImageDataUrlResolver | undefined {
+  if (prepared === undefined) return fallback
+  return (attachment: unknown): string | undefined => {
+    if (attachment !== null && typeof attachment === 'object') {
+      const id = (attachment as { attachmentId?: unknown }).attachmentId
+      if (typeof id === 'string') {
+        const derived = prepared.get(id)
+        if (derived !== undefined) return derived.dataUrl
+      }
+    }
+    return fallback?.(attachment)
+  }
+}
+
+/**
+ * Inline length of each occurrence, as this request will actually send it.
+ * @param prepared - images derived at this route's target, when available.
+ * @returns a per-occurrence cost function for the budget.
+ */
+function preparedBytesOf(
+  prepared: PreparedImageIndex | undefined,
+): (block: ImageBlock) => number {
+  return (block: ImageBlock): number => {
+    const derived = prepared?.get(String(block.attachment.attachmentId))
+    if (derived !== undefined) return inlineBytesOf(derived.bytes)
+    return inlineBytesOf(block.attachment.bytes)
+  }
 }
 
 /**
