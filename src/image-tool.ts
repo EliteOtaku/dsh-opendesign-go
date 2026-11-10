@@ -173,9 +173,9 @@ export async function generateForTool(
       model,
       prompt: args.prompt,
       ...(args.size === undefined || args.size.length === 0 ? {} : { size: args.size }),
-      // The API key already carries `/v1` in `baseURL`, so the surface is the
-      // bare `/images/...` path; joining both was the 404 this route used to
-      // answer with.
+      // `baseURL` already ends in `/v1` (see `DEFAULT_BASE_URL`), so the surface
+      // is the bare `/images/...` path. The chat path joins the same way, which is
+      // why both land on `/v1/...` without a second version segment.
       url: `${baseURL}/images/generations`,
       apiKey,
       signal: controller.signal,
