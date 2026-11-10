@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { LlmError } from '@deepseek-ai/dsh-llm'
-import { imageModelsOf, resolveImageModel } from '../src/image-tool.ts'
-import { imageBlocks, renderImages } from '../src/image-tool-register.ts'
+import { IMAGE_TOOL_NAME, imageModelsOf, resolveImageModel } from '../src/image-tool.ts'
+import { createImageTool, imageBlocks, renderImages } from '../src/image-tool-register.ts'
 import type { ToolImage } from '../src/image-tool.ts'
 import type { OpenDesignConfig } from '../src/config-contract.ts'
 
@@ -87,5 +87,41 @@ describe('image tool result', () => {
   it('counts a batch correctly', () => {
     const blocks = imageBlocks('Generated 2 pictures.', [IMAGE, { ...IMAGE, attachmentId: 'sha256:aa11' }])
     expect(blocks.filter((block) => block.type === 'image')).toHaveLength(2)
+  })
+})
+
+describe('image tool definition', () => {
+  it('is accepted by the real defineTool schema compiler', () => {
+    // `defineTool` validates the parameter and output schemas at construction, so
+    // building the definition is itself the check that the contract it declares is
+    // one the harness accepts — a tool whose schema is rejected cannot be
+    // registered at all.
+    const tool = createImageTool({
+      config: () => ({ catalogJson: '', baseURL: 'https://gw.test/v1', apiKeyEnv: 'K', requestTimeoutMs: 1000 }) as unknown as OpenDesignConfig,
+      resolveApiKey: async () => 'sk',
+      attachments: () => undefined,
+    })
+    expect(tool.name).toBe(IMAGE_TOOL_NAME)
+    expect(tool.parameters.required).toEqual(['prompt'])
+    expect(Object.keys(tool.parameters.properties ?? {}).sort()).toEqual(['model', 'prompt'])
+  })
+
+  it('renders committed images into the result the model receives', () => {
+    const tool = createImageTool({
+      config: () => ({ catalogJson: '', baseURL: 'https://gw.test/v1', apiKeyEnv: 'K', requestTimeoutMs: 1000 }) as unknown as OpenDesignConfig,
+      resolveApiKey: async () => 'sk',
+      attachments: () => undefined,
+    })
+    const blocks = tool.output.render({ prompt: '一只柴犬' }, {
+      model: 'seedream-5.0',
+      images: [{
+        attachmentId: 'sha256:7f3a',
+        mediaType: 'image/png',
+        bytes: 1024,
+        width: 1024,
+        height: 1024,
+      }],
+    })
+    expect(blocks.map((block) => block.type)).toEqual(['text', 'image'])
   })
 })
