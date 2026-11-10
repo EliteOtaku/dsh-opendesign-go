@@ -111,6 +111,8 @@ import type { CacheSnapshot } from './cache-retry.ts'
 import { createThrottle, systemClock } from './throttle.ts'
 import { OpenDesignUsageService, sessionResolverOf } from './usage.ts'
 import { DEFAULT_SESSION_REF } from './config-contract.ts'
+import { IMAGE_TOOL_NAME } from './image-tool.ts'
+import { registerImageTool } from './image-tool-register.ts'
 
 /** Plugin module name; stable, and declared in dsh-plugin.naming.json. */
 export const name = 'llm-opendesign-go'
@@ -625,6 +627,28 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     ctx.logger.info(
       `llm-opendesign-go: attachment store ${attachments === undefined ? 'absent; images project to text' : 'mounted'}`,
     )
+  })
+
+  /**
+   * Mount the generation tool.
+   *
+   * Optional like the store: a host with no tool registry (a one-shot embedder)
+   * still needs the chat route, and refusing to activate over a missing optional
+   * service would turn an unused feature into a plugin that will not load.
+   *
+   * Registration is what makes an image model usable at all. Those ids cannot be
+   * the route of a conversation turn — they answer with a picture and no text —
+   * so the tool is the only way to call one, and the adapter refuses them by name
+   * rather than letting the gateway report an unknown model.
+   */
+  ctx.inject(['tools'], (toolCtx) => {
+    if (toolCtx.get('tools') === undefined) return
+    toolCtx.effect(() => registerImageTool(toolCtx, {
+      config: current,
+      resolveApiKey,
+      attachments: () => attachments,
+    }), 'dsh-opendesign-go: image tool')
+    ctx.logger.info(`llm-opendesign-go: image tool "${IMAGE_TOOL_NAME}" registered`)
   })
 
   const adapter = new OpenDesignAdapter({

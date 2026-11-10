@@ -17,6 +17,30 @@ export interface AttachmentsSeam {
      */
     readonly imageHostPath?: (ref: unknown) => string | undefined;
     /**
+     * Derive (and cache) the exact request version of one image.
+     *
+     * This is the harness's own downscale path: the caller names the dimensions and
+     * byte ceiling it wants, and the store re-encodes the stored object down a
+     * quality ladder until it fits. Without it a request carries whatever size the
+     * user uploaded, forever, on every turn.
+     *
+     * Absent on a host whose store predates the seam, which is why the caller falls
+     * back to the stored bytes instead of failing the request.
+     * @param ref - durable provider-independent normalized reference.
+     * @param target - route-chosen dimensions and byte target.
+     * @param signal - optional cancellation.
+     * @returns the derived bytes plus the media type they were encoded as.
+     */
+    readonly readImageRequest?: (ref: unknown, target: {
+        readonly width: number;
+        readonly height: number;
+        readonly maxBytes: number;
+    }, signal?: AbortSignal) => Promise<{
+        readonly data: Uint8Array;
+        readonly bytes: number;
+        readonly mediaType: string;
+    }>;
+    /**
      * Validate and durably commit one generated image.
      *
      * Absent on a host whose store has no write path, which is why the image route

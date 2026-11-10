@@ -6,15 +6,19 @@
 
 修两个都会让会话彻底没法继续的问题：图片多的会话必定 413，生图模型选中就报错。
 
-### 图片请求预算
+### 图片请求缩放与预算
 
 现象是一句 `OpenDesign request failed (413)`，后面跟着 nginx 的 HTML 报错页；同时压缩也失败，报 `Compaction could not produce a useful summary`。整个会话就此卡死，换任何模型都一样。
 
-根因是请求体里的图片字节没有任何上界。Chat Completions 没有 Files 上传，所以每一轮的每一张历史图片都要按 base64 重发一次 —— 实测那个会话累计 20 张 2048px PNG，原始 16.68 MB，base64 后 22.24 MB，横竖都比网关前面 nginx 的接受上限大。压缩要发同一份历史，于是同样被拒。
+根因是请求体里的图片按**原图**字节重发。Chat Completions 没有 Files 上传，所以每一轮的每一张历史图片都要重新 base64 编码一次 —— 实测那个会话累计 28 张图，原始 41.30 MB，base64 后 55.06 MB，平均每张 1.47 MB、最大 3.76 MB，横竖都比网关前面 nginx 的接受上限大。压缩要发同一份历史，于是同样被拒。
 
-现在按宿主已有的 `IMAGE_OFFLOAD_REQUIRED` 契约处理：请求超预算时不自己丢图，而是抛一个带 `offloadImages: N` 的错误，由 `dsh-compaction-image-offload` 记一条 `image/offload` 事件再重试。自己不丢是因为**没记录的投影会让会话日志与实际发送的内容不一致** —— 日志说那轮带了图，模型其实没看到，之后的回放和计费全都对不上。
+现在分两步。**先缩放**：按宿主定义的 `imageRequestTarget` 声明本路由要的尺寸与字节上限，再用 `attachments.readImageRequest` 取缩放后的请求版本 —— 和 `dsh-llm-deepseek`、`dsh-llm-pi-ai` 一样取 2048² / 1 MiB。同一个会话的请求体因此从 55.06 MB 降到 30.48 MB，28 张里 11 张会变小，而图片全都还在、模型照样看得见。缩放严格优于丢图：降了清晰度的截图模型还能读，被 offload 的图只剩一行占位文本。
 
-预算取 24 MiB / 60 张，按 8 MiB 与 20 张的整块前进（按最小需要量丢，会每轮多丢一张、每次重写历史都打断 prompt 缓存）。网关不公布这个阈值，24 MiB 是保守值：同类网关实测约 50.17 MB，取一半留足余量给文本、工具声明和 JSON 框架。
+**再兜底**：缩放解决不了的仍按 `IMAGE_OFFLOAD_REQUIRED` 契约处理，超预算时不自己丢图，而是抛一个带 `offloadImages: N` 的错误，由 `dsh-compaction-image-offload` 记一条 `image/offload` 事件再重试。自己不丢是因为**没记录的投影会让会话日志与实际发送的内容不一致** —— 日志说那轮带了图，模型其实没看到，之后的回放和计费全都对不上。
+
+预算取 20 MiB / 60 张，按 8 MiB 与 20 张的整块前进（按最小需要量丢，会每轮多丢一张、每次重写历史都打断 prompt 缓存）。20 MiB 与 `dsh-llm-pi-ai` 的 base64 上限取同一个值；网关不公布自己的阈值，nginx 的 413 也不带数字。
+
+只统计 `user` 与 `tool` 里的图。`assistant` 里的图（也就是自己生成的）既不发送，宿主的 offload 也只扫 `user`/`tool` 事件 —— 把它们算进预算会要求一次永远无法完成的操作，会话就此卡死。
 
 只在真的会发图片字节的路由上计量。纯文本模型下图片本来就投影成占位文本，对它计费会要求一次释放不了任何字节的 offload。
 
@@ -22,7 +26,9 @@
 
 `gpt-image-2`、`seedream-5.0`、`nano-banana-2` 这些 id 一直在模型列表里，选中之后每个请求都失败。原因是 `GET /models` 把对话模型和生图模型混在一个列表里，只给 id 不给输出模态，插件把每个 id 都当对话模型，用通用默认值补成「1M 上下文」然后 `POST /chat/completions` —— 网关必然拒绝。
 
-现在目录快照多记一个 `imageIds`，标出哪些 id 是生图模型；选中它们时改走 `POST /images/generations`，返回的 base64 经 `attachments.saveImage` 落成持久引用，作为一个正常的 assistant 图片块贴进回复。所以生成的图能被后续对话继续读取，重启也还在。
+现在目录快照多记一个 `imageIds`，标出哪些 id 是生图模型；它们由 `opendesign_generate_image` 工具调用，改走 `POST /images/generations`，返回的 base64 经 `attachments.saveImage` 落成持久引用，**作为工具结果**回到会话。所以生成的图能被后续对话继续读取，重启也还在。
+
+做成工具而不是贴进 assistant 消息，是因为三条都要求如此：`dsh-llm-deepseek` 与 `dsh-llm-pi-ai` 都把 assistant 图片判为 `UNSUPPORTED_CONTENT`；宿主的 `dsh-compaction-image-offload` 只扫 `user/message` 与 `tool/result`，assistant 的图永远选不中；而被计入预算又无法 offload 的图会让会话卡在一个修不好的状态里。工具结果三条都满足 —— 模型看得到图，会话重了能 offload，画廊照常渲染。
 
 设置页给这些行加了「生图模型」标注，并隐藏上下文/输出上限与「改参数」——它们没有这些参数。分类规则是：目录声明了 `output_modalities` 就以声明为准（双向有效），只有什么都没说时才查已知生图 id 表。
 

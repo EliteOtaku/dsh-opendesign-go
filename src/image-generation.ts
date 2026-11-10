@@ -150,6 +150,20 @@ export async function failureOf(response: Response): Promise<LlmError> {
 }
 
 /**
+ * File extension for one accepted media type.
+ * @param mediaType - verified image media type.
+ * @returns the extension to name the stored object with.
+ */
+export function extensionOf(mediaType: string): string {
+  switch (mediaType) {
+    case 'image/jpeg': return 'jpg'
+    case 'image/webp': return 'webp'
+    case 'image/gif': return 'gif'
+    default: return 'png'
+  }
+}
+
+/**
  * Ask the gateway to generate images for one prompt.
  *
  * Never retries: the harness owns retry, and an image request retried here would

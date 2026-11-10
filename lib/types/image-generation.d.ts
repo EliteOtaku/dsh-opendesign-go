@@ -76,6 +76,12 @@ export declare function imagesOf(body: unknown): GeneratedImage[];
  */
 export declare function failureOf(response: Response): Promise<LlmError>;
 /**
+ * File extension for one accepted media type.
+ * @param mediaType - verified image media type.
+ * @returns the extension to name the stored object with.
+ */
+export declare function extensionOf(mediaType: string): string;
+/**
  * Ask the gateway to generate images for one prompt.
  *
  * Never retries: the harness owns retry, and an image request retried here would

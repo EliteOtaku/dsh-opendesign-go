@@ -28,6 +28,26 @@ export declare function partsOf(blocks: readonly ContentBlock[], resolveImage: I
     images: string[];
 };
 /**
+ * Project one assistant message, including its tool calls.
+ * @param content - assistant content blocks.
+ * @param resolveImage - route image resolver, absent for text-only routes.
+ * @returns the wire message, or undefined when it would carry nothing.
+ */
+/**
+ * Visible text of an assistant turn, ignoring the pictures it produced.
+ *
+ * Companion to {@link partsOf} for the assistant role only. `partsOf` turns an
+ * unsendable image into the harness's text-only placeholder, which is the honest
+ * answer for a user attachment on a text model but wrong here: the model produced
+ * this picture itself, so telling it "this model accepts text only" about its own
+ * output would be both untrue and confusing. The occurrence is simply not
+ * replayed, and its durable attachment stays in the session for the gallery and
+ * for a later `read_image`.
+ * @param blocks - model-facing blocks of one assistant message.
+ * @returns the turn's visible text.
+ */
+export declare function assistantText(blocks: readonly ContentBlock[]): string;
+/**
  * Join the one-shot system prompt with the leading system-role message.
  * @param system - system prompt supplied through {@link GenerateOptions.system}.
  * @param existing - text of the leading system-role message.
