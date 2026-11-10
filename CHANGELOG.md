@@ -2,6 +2,92 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 0.1.20
+
+修长会话图片撑爆请求体，以及生图模型选中就报错（[PR #4](https://github.com/EliteOtaku/dsh-opendesign-go/pull/4)，作者 BaxterL）。
+
+两个症状看着无关，根因是同一层：图片字节在这个适配器里从来没有被「投影」过 —— 发出去的、算进预算的、能回收的，三者不是同一个集合。
+
+### 症状
+
+会话用久了必定失败，而且换任何模型都一样：
+
+```
+OpenDesign request failed (413): <html>...<center>nginx</center>...</html>
+```
+
+紧接着压缩也失败（`Compaction could not produce a useful summary`），会话就此卡死。
+
+另一个：`gpt-image-2`、`seedream-5.0`、`nano-banana-2` 出现在模型选择器里，选中后每个请求都报 `404 [code=model_not_found]`。
+
+### 原因
+
+**413 是字节数问题，只是从客户端看不出。** 每张历史图片都被 `readFileSync(...).toString('base64')` 原样塞进 `data:` URL。Chat Completions 没有 Files 上传，所以每张图每一轮都按**原图**长度重发一次，请求体单调增长，直到网关前面的 nginx 拒收。nginx 的 413 页面既不带阈值也不是 JSON。
+
+实测一个会话：28 张历史图，附件库 41.30 MB，base64 后**55.06 MB**（平均 1.47 MB/张，最大 3.76 MB）。
+
+**404 是分类问题。** `GET {baseURL}/models` 把对话模型和生图模型混在一个列表里，只给 id 不给输出模态。插件把每个 id 都当对话模型补成「1M 上下文」，然后 `POST /chat/completions` —— 而这些模型只吃 `POST /images/generations`。
+
+### 改法一：先按路由声明的尺寸缩放
+
+这是修字节数本身。适配器实现 `imageRequestTarget()`，声明 2048² / 1 MiB，宿主据此调 `attachments.readImageRequest(ref, target)` 拿到缩放后的字节。同一个会话：请求体图片部分从 55.06 MB 降到 **30.48 MB**（28 张里 11 张变小，其余不动）。
+
+缩放严格优于丢图：降了清晰度的截图模型还能读，被 offload 的图只剩一行占位文本。**永不放大** —— 小图保持原样。
+
+缩放解决不了的部分走宿主的 `IMAGE_OFFLOAD_REQUIRED` 契约：超预算时抛带 `offloadImages: N` 的 `LlmError`，由 `dsh-compaction-image-offload` 记一条 `image/offload` 事件再重试。
+
+不自己丢图是因为**没有记录的投影会让会话日志与实际发送的内容不一致** —— 日志说那轮带了图，模型其实没看到，之后的回放、计费和复制会话全都对不上。
+
+预算（`src/image-request-budget.ts`）：
+
+| 常量 | 值 | 理由 |
+| --- | --- | --- |
+| 单请求内联图片字节 | 20 MiB | 与 `dsh-llm-pi-ai` 的 base64 上限同值；网关不公布阈值，nginx 的 413 也不带数字 |
+| 每次 offload 移除的字节 | 8 MiB | 按最小需要量丢会每轮多丢一张，每次重写历史都打断 prompt 缓存 |
+| 单请求图片张数 | 60 | 独立于字节的第二道闸，很多小图靠字节闸拦不住 |
+| 每次 offload 移除的张数 | 20 | 同上 |
+
+超额算式直接复用宿主的 `requiredImageOffload`，不写第二份实现。
+
+**一个死锁必须避开。** `requiredImageOffload` 只按 `role` 过滤，但三条事实互相对抗：`conversion.ts` 不重放 assistant 图片、宿主的 offload 插件明确排除 assistant 节点、而 `requiredImageOffload` 不看 role。三者相乘的结果是：一个只有 5 张自生成图的会话，旧逻辑要求 `offloadImages = 3`，宿主能选中的是 0 张，**每次请求都失败且永远出不来**。现在只统计真正会发出去的那些：已 offload 的不计、assistant 侧的不计、纯文本模型下也不计（图片本来就投影成占位文本，对它计费会要求一次释放不了任何字节的 offload）。
+
+### 改法二：生图做成工具，结果作为 tool result 回到会话
+
+**不能做成 assistant 图片块。** 三条独立证据：官方适配器在两条转换路径上都把 assistant 图片判 `UNSUPPORTED_CONTENT`；宿主的 image offload 只扫 `user/message` 与 `tool/result`，assistant 的图永远选不中；被计入预算却无法 offload 的图会让会话卡在修不好的状态里（就是上面那个死锁）。
+
+tool result 三条都满足，这也正是 `dsh-image-gen` 的形状。流程：`POST {baseURL}/images/generations` → 逐张 `attachments.saveImage` → 渲染成 `text + image` 块。模型真的收到图，画廊照样渲染，会话重了也能被 offload。
+
+工具名取 `opendesign_generate_image` 而不是 `generate_image`：`dsh-image-gen` 可能同时挂载，两个同名全局工具会让注册直接失败。
+
+刻意保留的取舍：
+
+- **不重试。** 重试归宿主管；这里重试会为一份没人留下的产物付两次钱。
+- **点名要一个账号没有的模型就报错**，错误里列出能用的 id。静默换模型会为一张没被要求的图计费。
+- **prompt 为空就拒绝**：`/images/generations` 没有会话概念，空 prompt 会让网关生成一张随机图并计费。
+- **不报 usage。** Images 端点不报 token，编一个数字会让账本记录无法核对。
+
+### 模型目录区分生图模型
+
+目录快照新增 `imageIds`（`ids` 的子集）。`ids` 仍包含生图模型 —— 它们是账号买到的、可调用的，删掉等于把「不支持」伪装成「没有」。
+
+分类规则：目录声明了 `output_modalities` 就以声明为准，**双向**有效 —— 声明 `["text"]` 的即使叫 `gpt-image-2` 也算对话模型。只有目录什么都没说时，才查已知生图 id 表。沉默不能当成「生图」，那会误伤能用的对话模型。网关的 `output_modalities` 有两种形状（顶层、`architecture.output_modalities` 下），都读。
+
+`listModels()` 过滤掉生图模型：生图没有文本可流式返回，选中它根本没有可发的一轮。设置页读的是目录而不是这个列表，所以照样列出并标注「生图模型」，订阅里这部分额度仍然看得见。
+
+### 验证
+
+全量 478 个测试通过（45 个文件），比上一版多 54 例：4 个新测试文件共 45 例，另在 `adapter.spec.ts`、`catalog.spec.ts`、`catalog-fetch.spec.ts` 补 9 例。四条新测试专门钉住关键判断：`defineTool` 真的接受生图工具的 schema、在**真实的** `ToolRuntime` 上注册成功并可释放（含重名拒绝）、生图模型作为对话路由被拒且**一个请求都没发**、assistant-only 历史要求 0 次 offload（死锁回归）。
+
+门禁：typecheck 通过、`check:dist` 一致、`verify:load` 通过、`test:hosts` 在 0.2.0-rc.1 / 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.2-alpha.2 四个宿主版本全 PASS。
+
+### 已知限制
+
+- 20 MiB 是取官方同值，不是测出来的：网关不公布上限，nginx 的 413 也不带数字。取小了会提前丢图（丢的是最旧的，可接受），取大了会继续 413。
+- 缩放后仍超预算的长会话还是会被 offload 掉最旧的图。这是宿主契约的设计意图，但一个会话累计了几十张大图时，最早期那批最终会变成占位文本。
+- `readImageRequest` 派生失败（比如解码器不认某种格式）时回退到原对象字节 —— 请求仍然合法，只是大一点。
+- 只做文生图，不做图生图：`/images/generations` 不吃图片输入，所以「把刚才那张图改成蓝色」无法工作，要做得换成 `/images/edits`。
+- `output_modalities` 是网关的字段，不是标准。缺失时退回已知 id 表；表里没有的新生图模型会被当成对话模型，症状与本次修的 404 相同。
+
 ## 0.1.19
 
 修并行工具调用偶发失败（[issue #5](https://github.com/EliteOtaku/dsh-opendesign-go/issues/5)）。
