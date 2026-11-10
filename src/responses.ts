@@ -25,7 +25,7 @@ import {
   appendText,
   closeOpenBlocks,
   isRecord,
-  takeIndex,
+  startToolCall,
   toTokenUsage,
   toolCallId,
 } from './stream-state.ts'
@@ -353,10 +353,7 @@ export function translateResponsesEvent(state: StreamState, payload: string): St
       // Without a provider id the call cannot correlate with its result.
       if (key === undefined || typeof callId !== 'string' || callId === '') break
       const name = typeof item.name === 'string' ? item.name : ''
-      const call = { index: takeIndex(state), id: toolCallId(callId), name, arguments: '' }
-      state.toolCalls.set(key, call)
-      state.contentBlocks += 1
-      chunks.push({ type: 'block-start', index: call.index, blockType: 'tool-call' })
+      startToolCall(state, key, toolCallId(callId), name, chunks)
       break
     }
     case 'response.function_call_arguments.delta': {

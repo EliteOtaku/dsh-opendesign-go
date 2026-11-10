@@ -248,6 +248,138 @@ describe('OpenDesignAdapter.stream', () => {
     ])
   })
 
+  it('keeps distinct indices as distinct calls', async () => {
+    // The normal shape: two calls numbered 0 and 1. The index-reuse guard above
+    // must not fire here, or every parallel turn would split a call in two.
+    stubFetch(
+      sse([
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'call_a', type: 'function', function: { name: 'read', arguments: '' } },
+                { index: 1, id: 'call_b', type: 'function', function: { name: 'bash', arguments: '' } },
+              ],
+            },
+            finish_reason: null,
+          }],
+        }),
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, function: { arguments: '{"url":"u"}' } },
+                { index: 1, function: { arguments: '{"command":"ls"}' } },
+              ],
+            },
+            finish_reason: null,
+          }],
+        }),
+        JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    const assembler = new BlockAssembler()
+    for (const chunk of await collect(adapterWith().stream(request()))) assembler.push(chunk)
+
+    expect(assembler.blocks()).toEqual([
+      { type: 'tool-call', id: 'call_a', name: 'read', arguments: '{"url":"u"}' },
+      { type: 'tool-call', id: 'call_b', name: 'bash', arguments: '{"command":"ls"}' },
+    ])
+  })
+
+  it('does not split one call whose deltas repeat its id', async () => {
+    // Some gateways resend the id on every arguments delta. Repeating an id is
+    // the same call, so the guard must compare ids and not merely notice one.
+    stubFetch(
+      sse([
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'call_1', type: 'function', function: { name: 'read', arguments: '{"url":' } },
+              ],
+            },
+            finish_reason: null,
+          }],
+        }),
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            delta: { tool_calls: [{ index: 0, id: 'call_1', function: { arguments: '"u"}' } }] },
+            finish_reason: null,
+          }],
+        }),
+        JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    const assembler = new BlockAssembler()
+    for (const chunk of await collect(adapterWith().stream(request()))) assembler.push(chunk)
+
+    expect(assembler.blocks()).toEqual([
+      { type: 'tool-call', id: 'call_1', name: 'read', arguments: '{"url":"u"}' },
+    ])
+  })
+
+  it('starts a second tool call when the gateway reuses an index for a new id', async () => {
+    // The gateway intermittently numbers two parallel calls with the same
+    // `index: 0` while giving them distinct ids. Keying only by index folds the
+    // second call into the first: its name overwrites the first's, and its
+    // arguments concatenate onto the first's JSON, so the host receives
+    // `{"url":"..."}{"command":"..."}` — valid JSON for neither call and
+    // rejected as `"arguments" must be an object`.
+    stubFetch(
+      sse([
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'call_read', type: 'function', function: { name: 'read', arguments: '' } },
+              ],
+            },
+            finish_reason: null,
+          }],
+        }),
+        JSON.stringify({
+          choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"url":"https://example.test/doc"}' } }] }, finish_reason: null }],
+        }),
+        JSON.stringify({
+          choices: [{
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'call_bash', type: 'function', function: { name: 'bash', arguments: '' } },
+              ],
+            },
+            finish_reason: null,
+          }],
+        }),
+        JSON.stringify({
+          choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"command":"ls"}' } }] }, finish_reason: null }],
+        }),
+        JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    const assembler = new BlockAssembler()
+    for (const chunk of await collect(adapterWith().stream(request()))) assembler.push(chunk)
+
+    const blocks = assembler.blocks()
+    expect(blocks).toEqual([
+      { type: 'tool-call', id: 'call_read', name: 'read', arguments: '{"url":"https://example.test/doc"}' },
+      { type: 'tool-call', id: 'call_bash', name: 'bash', arguments: '{"command":"ls"}' },
+    ])
+    expect(assembler.finish).toEqual({ kind: 'tool-calls' })
+  })
+
   it('produces a chunk stream the host assembler can assemble', async () => {
     stubFetch(
       sse([

@@ -50,7 +50,7 @@ import {
   closeOpenBlocks,
   createStreamState,
   isRecord,
-  takeIndex,
+  startToolCall,
   toTokenUsage,
 } from './stream-state.ts'
 import type { StreamState } from './stream-state.ts'
@@ -755,13 +755,15 @@ function collectDelta(state: StreamState, delta: Record<string, unknown>, chunks
     const argumentsDelta = fn !== undefined && typeof fn.arguments === 'string' ? fn.arguments : undefined
 
     let call = state.toolCalls.get(toolIndex)
+    // A gateway under load can number two parallel calls with the same index
+    // while giving them distinct ids; keying the routing table by index alone
+    // made the second call overwrite the first's name and append its arguments
+    // to the first's JSON, producing `{...}{...}` that parses as neither.
+    if (call !== undefined && id !== undefined && call.id !== id) call = undefined
     if (call === undefined) {
       // Without a provider id the call cannot correlate with its result.
       if (id === undefined) continue
-      call = { index: takeIndex(state), id: ToolCallId(id), name: name ?? '', arguments: '' }
-      state.toolCalls.set(toolIndex, call)
-      state.contentBlocks += 1
-      chunks.push({ type: 'block-start', index: call.index, blockType: 'tool-call' })
+      call = startToolCall(state, toolIndex, ToolCallId(id), name ?? '', chunks)
     }
     if (name !== undefined) call.name = name
 

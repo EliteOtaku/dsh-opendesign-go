@@ -307,6 +307,36 @@ describe('translateResponsesEvent', () => {
     expect(translate([{ type: 'response.function_call_arguments.delta', output_index: 7, delta: '{}' }])).toEqual([])
   })
 
+  it('closes every call it opened even when two share one output index', () => {
+    // Responses keys calls by `output_index`, which a gateway can also reuse.
+    // Only the newest call stays in the routing table, so the earlier one is
+    // reachable only through the ordered list — losing it would drop a call the
+    // model did ask for.
+    const state = createStreamState()
+    const chunks: StreamChunk[] = []
+    for (const event of [
+      {
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: { type: 'function_call', call_id: 'call_a', name: 'read' },
+      },
+      { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"url":"u"}' },
+      {
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: { type: 'function_call', call_id: 'call_b', name: 'bash' },
+      },
+      { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"command":"ls"}' },
+      { type: 'response.completed', response: { status: 'completed' } },
+    ]) chunks.push(...translateResponsesEvent(state, JSON.stringify(event)))
+
+    const closes = chunks.filter((chunk) => chunk.type === 'block-end')
+    expect(closes.map((chunk) => chunk.type === 'block-end' ? chunk.block : undefined)).toEqual([
+      { type: 'tool-call', id: 'call_a', name: 'read', arguments: '{"url":"u"}' },
+      { type: 'tool-call', id: 'call_b', name: 'bash', arguments: '{"command":"ls"}' },
+    ])
+  })
+
   it('reports usage and a token-limit finish for a truncated response', () => {
     const state = createStreamState()
     const chunks: StreamChunk[] = []

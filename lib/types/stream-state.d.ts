@@ -38,8 +38,19 @@ export interface StreamState {
     text: TextBlockState | undefined;
     /** Open reasoning block, if the response produced one. */
     reasoning: TextBlockState | undefined;
-    /** Open tool calls, keyed by the provider's own per-response item key. */
+    /**
+     * Routing table: the call that later id-less deltas on this provider key
+     * append to. Only the newest call at a key lives here, so a gateway that
+     * reuses an index for a second call cannot corrupt the first.
+     */
     readonly toolCalls: Map<number | string, ToolCallState>;
+    /**
+     * Every tool call this response opened, in first-seen order.
+     *
+     * {@link closeOpenBlocks} reads this rather than {@link StreamState.toolCalls}
+     * because a reused key leaves the earlier call reachable only from here.
+     */
+    readonly openToolCalls: ToolCallState[];
     /** Terminal stop reason once the provider names one. */
     finishReason: FinishReason | undefined;
     /** Token accounting once the provider reports it. */
@@ -72,6 +83,20 @@ export declare function appendText(state: StreamState, text: string, chunks: Str
  * @param chunks - accumulator for emitted chunks.
  */
 export declare function appendReasoning(state: StreamState, text: string, chunks: StreamChunk[]): void;
+/**
+ * Open one tool call and publish its block start.
+ *
+ * Both protocols go through here rather than constructing a call at the call
+ * site: the routing table and the ordered list have to agree, and a call built
+ * elsewhere would be invisible to {@link closeOpenBlocks}.
+ * @param state - per-response streaming state.
+ * @param key - provider key that later id-less deltas will carry.
+ * @param id - provider-issued call id, already branded.
+ * @param name - declared tool name, or '' when the provider names it later.
+ * @param chunks - accumulator for emitted chunks.
+ * @returns the opened call.
+ */
+export declare function startToolCall(state: StreamState, key: number | string, id: ToolCallId, name: string, chunks: StreamChunk[]): ToolCallState;
 /**
  * Close every block still open, in first-seen order.
  * @param state - per-response streaming state.
