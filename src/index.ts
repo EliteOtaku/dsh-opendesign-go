@@ -23,7 +23,7 @@ import { Config, assertApiKeyEnv, assertBaseURL, readConfig } from './config.ts'
 import type { LiveConfig } from './config.ts'
 import { DISPLAY_NAME, PROVIDER_ID, SETTINGS_NAMESPACE } from './config-contract.ts'
 import type { OpenDesignConfig } from './config-contract.ts'
-import { GO_DESIGN_PLAN_MODELS, listSeedModels } from './catalog.ts'
+import { GO_DESIGN_PLAN_MODELS, isImageModel, listSeedModels } from './catalog.ts'
 import { fetchGatewayModels } from './catalog-fetch.ts'
 import { accountsOf, assertAccounts } from './accounts.ts'
 import { LedgerStore } from './ledger-store.ts'
@@ -111,6 +111,8 @@ import type { CacheSnapshot } from './cache-retry.ts'
 import { createThrottle, systemClock } from './throttle.ts'
 import { OpenDesignUsageService, sessionResolverOf } from './usage.ts'
 import { DEFAULT_SESSION_REF } from './config-contract.ts'
+import { IMAGE_TOOL_NAME } from './image-tool.ts'
+import { registerImageTool } from './image-tool-register.ts'
 
 /** Plugin module name; stable, and declared in dsh-plugin.naming.json. */
 export const name = 'llm-opendesign-go'
@@ -337,18 +339,30 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     // No key means the route is not registered either; writing a fallback
     // snapshot here would claim a catalog for a route that cannot serve it.
     if (key === undefined) return
-    const ids = await fetchGatewayModels(baseURL, key)
+    const entries = await fetchGatewayModels(baseURL, key)
     const asOf = new Date().toISOString()
-    const payload = ids === undefined
+    // The gateway mixes chat models with image-generation models, and the two
+    // are served by different endpoints, so the snapshot records which is which.
+    // An id the gateway did not describe is classified from the known-id table;
+    // a declared modality always wins.
+    const split = entries === undefined
+      ? { ids: GO_DESIGN_PLAN_MODELS.map((model) => model.id), imageIds: [] as string[] }
+      : {
+        ids: entries.map((entry) => entry.id),
+        imageIds: entries
+          .filter((entry) => isImageModel(entry.id, entry.outputModalities))
+          .map((entry) => entry.id),
+      }
+    const payload = entries === undefined
       ? {
         asOf,
         source: 'fallback',
-        ids: GO_DESIGN_PLAN_MODELS.map((model) => model.id),
+        ids: split.ids,
         error: '未能读取网关模型目录，正在显示内置的 Go 套餐列表',
       }
-      : { asOf, source: 'gateway', ids }
+      : { asOf, source: 'gateway', ids: split.ids, ...(split.imageIds.length === 0 ? {} : { imageIds: split.imageIds }) }
     ctx.logger.info(
-      `llm-opendesign-go: catalog ${payload.source} (${payload.ids.length} models)`,
+      `llm-opendesign-go: catalog ${payload.source} (${split.ids.length} models, ${split.imageIds.length} image)`,
     )
     const json = JSON.stringify(payload)
     void catalogRetry.publish(
@@ -615,10 +629,33 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     )
   })
 
+  /**
+   * Mount the generation tool.
+   *
+   * Optional like the store: a host with no tool registry (a one-shot embedder)
+   * still needs the chat route, and refusing to activate over a missing optional
+   * service would turn an unused feature into a plugin that will not load.
+   *
+   * Registration is what makes an image model usable at all. Those ids cannot be
+   * the route of a conversation turn — they answer with a picture and no text —
+   * so the tool is the only way to call one, and the adapter refuses them by name
+   * rather than letting the gateway report an unknown model.
+   */
+  ctx.inject(['tools'], (toolCtx) => {
+    if (toolCtx.get('tools') === undefined) return
+    toolCtx.effect(() => registerImageTool(toolCtx, {
+      config: current,
+      resolveApiKey,
+      attachments: () => attachments,
+    }), 'dsh-opendesign-go: image tool')
+    ctx.logger.info(`llm-opendesign-go: image tool "${IMAGE_TOOL_NAME}" registered`)
+  })
+
   const adapter = new OpenDesignAdapter({
     config: current,
     resolveApiKey,
     imageDataUrl,
+    attachments: () => attachments,
     onAccountSettled: (ref) => {
       // Promote a fallback account only after it produced output. The write goes
       // through the same config field the page edits, so the ordering the user

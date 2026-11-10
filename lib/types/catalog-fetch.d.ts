@@ -12,8 +12,24 @@
  * and anything unrecognised reads as "no catalog this start" rather than an
  * error. The caller falls back to the bundled list.
  *
+ * One field matters beyond the id: whether the entry produces text. The catalog
+ * mixes chat models and image-generation models, and the two need different
+ * endpoints, so an id list alone cannot say which request to send.
+ *
  * @module dsh-opendesign-go/catalog-fetch
  */
+/** One catalog entry as the gateway described it. */
+export interface GatewayModelEntry {
+    /** Exact model id. */
+    readonly id: string;
+    /**
+     * Output modalities the entry declared, or undefined when it declared none.
+     *
+     * Forwarded rather than interpreted here: the catalog module owns the rule
+     * that decides what counts as an image model, so the fetch stays a parser.
+     */
+    readonly outputModalities?: readonly string[];
+}
 /**
  * Ask the gateway which models this account may use.
  *
@@ -23,6 +39,6 @@
  * @param apiKey - the selected account's key.
  * @param fetchImpl - fetch implementation, injected for tests.
  * @param timeoutMs - request deadline.
- * @returns the model ids, or undefined when the catalog could not be read.
+ * @returns the entries, or undefined when the catalog could not be read.
  */
-export declare function fetchGatewayModels(baseURL: string, apiKey: string, fetchImpl?: typeof fetch, timeoutMs?: number): Promise<string[] | undefined>;
+export declare function fetchGatewayModels(baseURL: string, apiKey: string, fetchImpl?: typeof fetch, timeoutMs?: number): Promise<GatewayModelEntry[] | undefined>;

@@ -15,8 +15,10 @@
  * @module dsh-opendesign-go/adapter
  */
 import { LlmAdapter } from '@deepseek-ai/dsh-llm';
-import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
+import type { GenerateOptions, ImageBlock, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
 import { type OpenDesignConfig } from './config-contract.ts';
+import type { RequestImagePolicy } from './request-images.ts';
+import type { AttachmentsSeam } from './image-bytes.ts';
 /** What one adapter instance reads from the plugin. */
 export interface OpenDesignAdapterOptions {
     /** Current plugin configuration; read per request so settings changes apply. */
@@ -50,16 +52,44 @@ export interface OpenDesignAdapterOptions {
         usage: TokenUsage;
     }) => void;
     /**
+     * Current attachment store, or undefined when none is mounted.
+     *
+     * Read through a function because the store is injected asynchronously: the
+     * adapter is constructed before `ctx.inject(['attachments'])` settles, so
+     * capturing the store at construction would pin the absent case forever.
+     * @returns the mounted store, or undefined.
+     */
+    attachments?: () => AttachmentsSeam | undefined;
+    /**
      * Turn one durable image reference into an inline data URL.
      *
      * Absent means this host has no attachment service, so image content projects
      * to the harness placeholder text instead of bytes. The resolver is asked only
      * for models whose catalog entry declares the image modality, so a text-only
      * model never receives image bytes.
+     *
+     * Used as the fallback when the store has no request-version path: the adapter
+     * prefers `readImageRequest` through {@link attachments}, which is what keeps a
+     * large screenshot from being re-sent at its upload size forever.
      * @param attachment - the durable reference carried by an image block.
      * @returns a `data:` URL, or undefined when the bytes are not readable.
      */
     imageDataUrl?: (attachment: unknown) => string | undefined;
+    /**
+     * Dimensions and byte ceiling request images are derived at.
+     *
+     * Defaults to {@link DEFAULT_REQUEST_IMAGE_POLICY}, the same 4 Mpx / 1 MiB
+     * policy the bundled DeepSeek and pi-ai adapters use.
+     */
+    requestImagePolicy?: RequestImagePolicy;
+    /**
+     * Sink for image projection failures.
+     *
+     * A picture that cannot be derived is not worth failing a request over, but it
+     * must not vanish silently either.
+     * @param message - what could not be done.
+     */
+    warn?: (message: string) => void;
 }
 /**
  * Stream one model call.
@@ -107,6 +137,24 @@ export declare class OpenDesignAdapter extends LlmAdapter {
      * @returns provider/model identity plus resolved parameters.
      */
     resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
+    /**
+     * The dimensions and byte ceiling this route derives request images at.
+     *
+     * The harness calls this before serialization and hands the answer straight to
+     * `attachments.readImageRequest`, so declaring it is what makes an image cost
+     * the same here as on a bundled adapter. The default implementation returns the
+     * stored dimensions unchanged, which is why every image used to be re-sent at
+     * whatever size it was uploaded — the exact cause of the 413.
+     * @param _provider - registered provider route.
+     * @param _model - exact model id.
+     * @param image - normalized image whose request projection is being resolved.
+     * @returns the target used by request serialization.
+     */
+    imageRequestTarget(_provider: string, _model: string, image: ImageBlock['attachment']): {
+        width: number;
+        height: number;
+        maxBytes: number;
+    };
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
 }
 /**

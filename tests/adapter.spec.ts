@@ -1011,3 +1011,154 @@ describe('OpenDesignAdapter image dispatch', () => {
     expect(messages.map((row) => row.role)).toEqual(['user', 'assistant', 'tool'])
   })
 })
+
+describe('OpenDesignAdapter image budget', () => {
+  /**
+   * A history the gateway would refuse.
+   *
+   * Twenty 2048px PNGs is the session that produced the report: 16.68 MB stored,
+   * 22.24 MB once base64-encoded, sent in full on every request until the proxy
+   * in front of the gateway answered 413 with an HTML page.
+   */
+  const heavyHistory = (count: number): ContentBlock[] =>
+    Array.from({ length: count }, (_, index) => ({
+      type: 'image',
+      attachment: {
+        attachmentId: `sha256:${index}`,
+        mediaType: 'image/png',
+        bytes: 900_000,
+        width: 2048,
+        height: 2048,
+      },
+    }) as unknown as ContentBlock)
+
+  it('fails with IMAGE_OFFLOAD_REQUIRED before sending an oversized request', async () => {
+    // The harness owns the offload: it records an `image/offload` event naming
+    // which occurrences were dropped and retries. Dropping them here instead
+    // would leave the session log claiming bytes that were never sent, and the
+    // model would answer about pictures it never saw.
+    const fetchMock = stubFetch(sse(['[DONE]']))
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => 'data:image/png;base64,AAAA',
+    })
+    const error = await failureOf(adapter.stream(request({
+      messages: [{ role: 'user', content: heavyHistory(40) }],
+    })))
+    expect(error).toBeInstanceOf(LlmError)
+    expect((error as LlmError).code).toBe('IMAGE_OFFLOAD_REQUIRED')
+    expect((error as LlmError).failure.offloadImages).toBeGreaterThan(0)
+    // Nothing was sent: a request the gateway would answer 413 with should never
+    // reach the network, because the 413 names no threshold a caller can act on.
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('sends a history that fits', async () => {
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => 'data:image/png;base64,AAAA',
+    })
+    await collect(adapter.stream(request({
+      messages: [{ role: 'user', content: heavyHistory(2) }],
+    })))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not fail a request whose oversized images are already offloaded', async () => {
+    // The retry after an offload event carries the same history with the marks
+    // set. Counting them again would fail the retry with the same demand, which
+    // is an offload loop rather than a fix.
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    const adapter = new OpenDesignAdapter({
+      config: () => CONFIG,
+      resolveApiKey: async () => 'sk-test',
+      imageDataUrl: () => 'data:image/png;base64,AAAA',
+    })
+    const offloaded = heavyHistory(40).map((block) => (
+      block.type === 'image' ? { ...block, offloaded: true as const } : block
+    ))
+    await collect(adapter.stream(request({
+      messages: [{ role: 'user', content: offloaded }],
+    })))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+describe('OpenDesignAdapter image generation', () => {
+  /** A configuration whose catalog marks one model as image-generating. */
+  const IMAGE_CONFIG: OpenDesignConfig = {
+    ...CONFIG,
+    catalogJson: JSON.stringify({
+      source: 'gateway',
+      ids: ['deepseek-v4.1-flash', 'seedream-5.0'],
+      imageIds: ['seedream-5.0'],
+    }),
+  }
+
+  /** An adapter whose catalog marks `seedream-5.0` as an image model. */
+  function imageAdapter() {
+    return new OpenDesignAdapter({
+      config: () => IMAGE_CONFIG,
+      resolveApiKey: async () => 'sk-test',
+    })
+  }
+
+  it('refuses a generation model as the route of a conversation turn', async () => {
+    // A generation model answers with a picture and no text, so it is not a
+    // conversation route at all. It used to be advertised like a chat model, and
+    // selecting it sent `POST /chat/completions`, which the gateway rejects.
+    // Generation is served by the tool; this branch has to say so by name.
+    const fetchMock = stubFetch(json({ data: [] }, 200))
+    const error = await failureOf(imageAdapter().stream(request({
+      model: 'seedream-5.0',
+      messages: [{ role: 'user', content: [{ type: 'text', text: '一只柴犬' }] }],
+    })))
+    expect((error as LlmError).code).toBe('INVALID_REQUEST')
+    expect((error as LlmError).message).toContain('opendesign_generate_image')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a chat model on chat completions', async () => {
+    // The branch must not swallow the ordinary path: a catalog that marks one
+    // model does not make every model an image model.
+    const fetchMock = stubFetch(sse([
+      JSON.stringify({ choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]))
+    await collect(imageAdapter().stream(request({ model: 'deepseek-v4.1-flash' })))
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://gateway.test/v1/chat/completions')
+  })
+})
+
+describe('OpenDesignAdapter model list', () => {
+  it('keeps generation models out of the conversation picker', async () => {
+    // A generation model answers with a picture and no text, so a conversation
+    // turn cannot be routed to one at all. Offering it in the picker only produced
+    // the reported "select it and every request fails"; it stays usable through
+    // `opendesign_generate_image`, and the settings page still lists it because it
+    // reads the catalog rather than this snapshot.
+    const adapter = new OpenDesignAdapter({
+      config: () => ({
+        ...CONFIG,
+        catalogJson: JSON.stringify({
+          source: 'gateway',
+          ids: ['deepseek-v4.1-flash', 'seedream-5.0'],
+          imageIds: ['seedream-5.0'],
+        }),
+      }),
+      resolveApiKey: async () => 'sk-test',
+    })
+    const ids = (await adapter.listModels('dsh-opendesign-go')).map((model) => model.id)
+    expect(ids).toEqual(['deepseek-v4.1-flash'])
+  })
+})

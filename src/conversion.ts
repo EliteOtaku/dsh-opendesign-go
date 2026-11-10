@@ -150,11 +150,45 @@ function contentOf(text: string, images: readonly string[]): ChatContent {
  * @param resolveImage - route image resolver, absent for text-only routes.
  * @returns the wire message, or undefined when it would carry nothing.
  */
+/**
+ * Visible text of an assistant turn, ignoring the pictures it produced.
+ *
+ * Companion to {@link partsOf} for the assistant role only. `partsOf` turns an
+ * unsendable image into the harness's text-only placeholder, which is the honest
+ * answer for a user attachment on a text model but wrong here: the model produced
+ * this picture itself, so telling it "this model accepts text only" about its own
+ * output would be both untrue and confusing. The occurrence is simply not
+ * replayed, and its durable attachment stays in the session for the gallery and
+ * for a later `read_image`.
+ * @param blocks - model-facing blocks of one assistant message.
+ * @returns the turn's visible text.
+ */
+export function assistantText(blocks: readonly ContentBlock[]): string {
+  let text = ''
+  for (const block of blocks) {
+    if (block.type !== 'text') continue
+    text += block.text
+  }
+  return text
+}
+
+/**
+ * Project one assistant message, including its tool calls.
+ * @param content - assistant content blocks.
+ * @param _resolveImage - unused: assistant images are never replayed.
+ * @returns the wire message, or undefined when it would carry nothing.
+ */
 function assistantMessage(
   content: readonly ContentBlock[],
-  resolveImage: ImageDataUrlResolver | undefined,
+  _resolveImage: ImageDataUrlResolver | undefined,
 ): ChatMessage | undefined {
-  const { text, images } = partsOf(content, resolveImage)
+  // Assistant images are never sent back. The harness calls `ImageBlock`
+  // role-neutral, but assistant-side images are forward compatibility rather than
+  // a supported wire shape: `dsh-llm-deepseek` and `dsh-llm-pi-ai` both reject
+  // them with `UNSUPPORTED_CONTENT`, and a gateway that took them would re-send a
+  // picture the model itself produced on every later turn — which is exactly how
+  // one generated image doubles the request body forever.
+  const text = assistantText(content)
   const toolCalls: ChatToolCall[] = []
   for (const block of content) {
     if (block.type !== 'tool-call') continue
@@ -167,10 +201,9 @@ function assistantMessage(
   // An assistant turn that produced neither visible text nor a tool call
   // (reasoning only) has nothing to replay; providers reject an empty turn.
   if (text === '' && toolCalls.length === 0) return undefined
-  const wireContent = contentOf(text, images)
   return toolCalls.length === 0
-    ? { role: 'assistant', content: wireContent }
-    : { role: 'assistant', content: wireContent, tool_calls: toolCalls }
+    ? { role: 'assistant', content: text }
+    : { role: 'assistant', content: text, tool_calls: toolCalls }
 }
 
 /**

@@ -8,10 +8,16 @@ function respondWith(body: unknown, ok = true): typeof fetch {
 
 const BASE = 'https://amr-link.open-design.ai/v1'
 
+/** Ids only: most cases care about which models came back, not how they are described. */
+async function idsOf(body: unknown, ok = true): Promise<string[] | undefined> {
+  const entries = await fetchGatewayModels(BASE, 'key', respondWith(body, ok))
+  return entries?.map((entry) => entry.id)
+}
+
 describe('fetchGatewayModels', () => {
   it('reads the OpenAI-shaped list the gateway returns', async () => {
     const body = { data: [{ id: 'deepseek-v4.1-flash' }, { id: 'claude-sonnet-5.5' }] }
-    await expect(fetchGatewayModels(BASE, 'key', respondWith(body))).resolves.toEqual([
+    await expect(idsOf(body)).resolves.toEqual([
       'deepseek-v4.1-flash',
       'claude-sonnet-5.5',
     ])
@@ -21,27 +27,42 @@ describe('fetchGatewayModels', () => {
     // The endpoint is the gateway's, not a standard anyone documented; accepting
     // the three shapes it could plausibly take is cheaper than a 403-shaped bug
     // report from a user whose account answers differently.
-    await expect(fetchGatewayModels(BASE, 'key', respondWith([{ id: 'a' }, { id: 'b' }])))
-      .resolves.toEqual(['a', 'b'])
-    await expect(fetchGatewayModels(BASE, 'key', respondWith({ models: [{ id: 'c' }] })))
-      .resolves.toEqual(['c'])
+    await expect(idsOf([{ id: 'a' }, { id: 'b' }])).resolves.toEqual(['a', 'b'])
+    await expect(idsOf({ models: [{ id: 'c' }] })).resolves.toEqual(['c'])
   })
 
   it('drops duplicates and entries without a usable id', async () => {
     const body = { data: [{ id: 'a' }, { id: 'a' }, { id: '' }, { id: 42 }, {}, null] }
-    await expect(fetchGatewayModels(BASE, 'key', respondWith(body))).resolves.toEqual(['a'])
+    await expect(idsOf(body)).resolves.toEqual(['a'])
+  })
+
+  it('carries a declared output modality through, in either documented shape', async () => {
+    // The gateway mixes chat models and image models in one list, and the two
+    // need different endpoints. Reading the modality here is what lets the
+    // catalog tell them apart instead of guessing from an id.
+    const entries = await fetchGatewayModels(BASE, 'key', respondWith({
+      data: [
+        { id: 'gpt-6-luna', output_modalities: ['text'] },
+        { id: 'seedream-5.0', architecture: { output_modalities: ['image'] } },
+        { id: 'undescribed-model' },
+      ],
+    }))
+    expect(entries).toEqual([
+      { id: 'gpt-6-luna', outputModalities: ['text'] },
+      { id: 'seedream-5.0', outputModalities: ['image'] },
+      { id: 'undescribed-model' },
+    ])
   })
 
   it('returns undefined for a body it does not recognise', async () => {
-    await expect(fetchGatewayModels(BASE, 'key', respondWith({ nope: true }))).resolves.toBeUndefined()
-    await expect(fetchGatewayModels(BASE, 'key', respondWith(null))).resolves.toBeUndefined()
+    await expect(idsOf({ nope: true })).resolves.toBeUndefined()
+    await expect(idsOf(null)).resolves.toBeUndefined()
   })
 
   it('returns undefined on a non-2xx response', async () => {
     // A rejected key and a broken gateway both mean "no catalog this start"; the
     // caller falls back rather than distinguishing them.
-    await expect(fetchGatewayModels(BASE, 'key', respondWith({ data: [{ id: 'a' }] }, false)))
-      .resolves.toBeUndefined()
+    await expect(idsOf({ data: [{ id: 'a' }] }, false)).resolves.toBeUndefined()
   })
 
   it('returns undefined rather than throwing when the request fails', async () => {

@@ -195,44 +195,49 @@ export function ModelsCard({ form, config, editable }: {
                     <span className={styles.modelId}>{model.id}</span>
                   </div>
                 </div>
-                <div className={styles.modelSide}>
-                  <span className={styles.modelMeta}>
-                    上下文 {context === undefined ? '未知' : tokens(context)}
-                    {context !== undefined && max !== undefined ? `（可用输入 ${tokens(usableInputTokens(context, max))}）` : ''}
-                    {' · '}输出 {max === undefined ? '未知' : tokens(max)}
-                    {override !== undefined && <span className={styles.edited}>（已改）</span>}
-                    {undocumented && <span className={styles.generic}>参数未收录</span>}
-                  </span>
-                  <Button
-                    disabled={!editable}
-                    onClick={() => {
-                      if (isEditing) {
-                        setEditing(undefined)
-                        return
-                      }
-                      // Prefill the effective value so the box shows what is
-                      // actually in use; leaving the fallback in the
-                      // placeholder made an empty box look like "unset" even
-                      // when a default applied.
-                      setDraftContext(String(override?.contextWindow ?? effective.contextWindow))
-                      setDraftMax(String(override?.maxTokens ?? effective.maxTokens))
-                      setError(undefined)
-                      setNotice(undefined)
-                      setEditing(model.id)
-                    }}
-                  >
-                    {isEditing ? '取消' : '改参数'}
-                  </Button>
-                </div>
+                {/* A generation model has no context window, no max_tokens and
+                    no parameter editor, so the whole side column is absent
+                    rather than showing a row of placeholders. */}
+                {model.imageGeneration !== true && (
+                  <div className={styles.modelSide}>
+                    <span className={styles.modelMeta}>
+                      上下文 {context === undefined ? '未知' : tokens(context)}
+                      {context !== undefined && max !== undefined ? `（可用输入 ${tokens(usableInputTokens(context, max))}）` : ''}
+                      {' · '}输出 {max === undefined ? '未知' : tokens(max)}
+                      {override !== undefined && <span className={styles.edited}>（已改）</span>}
+                      {undocumented && <span className={styles.generic}>参数未收录</span>}
+                    </span>
+                    <Button
+                      disabled={!editable}
+                      onClick={() => {
+                        if (isEditing) {
+                          setEditing(undefined)
+                          return
+                        }
+                        // Prefill the effective value so the box shows what is
+                        // actually in use; leaving the fallback in the
+                        // placeholder made an empty box look like "unset" even
+                        // when a default applied.
+                        setDraftContext(String(override?.contextWindow ?? effective.contextWindow))
+                        setDraftMax(String(override?.maxTokens ?? effective.maxTokens))
+                        setError(undefined)
+                        setNotice(undefined)
+                        setEditing(model.id)
+                      }}
+                    >
+                      {isEditing ? '取消' : '改参数'}
+                    </Button>
+                  </div>
+                )}
               </div>
 
-              {undocumented && (
+              {model.imageGeneration !== true && undocumented && (
                 <p className={styles.hint}>
                   插件未收录该模型的官方规格，上面是通用默认值（上下文 1M、输出 128K、全部思考档位）。
                   请按厂商文档核对后点「改参数」修改；改过的值不再显示此提示。
                 </p>
               )}
-              {isEditing && (
+              {model.imageGeneration !== true && isEditing && (
                 <div className={styles.editor}>
                   <div className={styles.editorRow}>
                     <Field label="上下文窗口">

@@ -1,13 +1,16 @@
 /**
  * Model catalog for the OpenDesign Go plan.
  *
- * M2 ships a static seed so the adapter has models to resolve before the live
- * catalog exists. M3 replaces the seed with `/v1/models` (entitlement-aware)
- * merged with the public `model-prices` endpoint, keeping this module as the
- * merge point so callers never depend on where a row came from.
+ * `GET {baseURL}/models` answers per entitlement and mixes two kinds of model in
+ * one list: chat models, which this route answers with `POST /chat/completions`,
+ * and image-generation models, which that endpoint rejects and only
+ * `POST /images/generations` serves. An id list alone therefore cannot say which
+ * request to send, and treating every id as a chat model is what made a
+ * generation model fail the moment it was selected.
  *
- * The fourteen ids below are the Design Plan models the Go plan grants. Go does
- * not include the package-model allowance, so nothing else is advertised.
+ * So a snapshot keeps both kinds apart — and keeps both. Dropping the image ids
+ * would make an entitled model invisible, which reads as a missing feature
+ * rather than a limit, and the account pays for them either way.
  *
  * @module dsh-opendesign-go/catalog
  */
@@ -19,6 +22,14 @@ export interface CatalogModel {
     readonly id: string;
     /** Human-readable name for selectors. */
     readonly name: string;
+    /**
+     * Whether this model answers with an image instead of text.
+     *
+     * The harness model vocabulary has no output-modality field, so this travels
+     * on the catalog row instead. It decides the endpoint, not the visibility:
+     * both kinds stay selectable.
+     */
+    readonly imageGeneration?: true;
 }
 /**
  * The Design Plan models a Go subscription grants, in display order.
@@ -57,6 +68,14 @@ export interface CatalogSnapshot {
     readonly source: CatalogSource;
     /** Model ids in display order. Empty is a real answer, not a missing one. */
     readonly ids: readonly string[];
+    /**
+     * Ids among {@link ids} that answer with an image.
+     *
+     * A snapshot written before this field existed reads as "none identified",
+     * so an old cache keeps its previous behaviour instead of silently
+     * reclassifying half the catalog.
+     */
+    readonly imageIds: readonly string[];
     /** Why the bundled list was used, when it was. */
     readonly error: string | undefined;
 }
@@ -88,8 +107,18 @@ export declare function parseCatalog(raw: string | undefined): CatalogSnapshot |
  * in; an *empty* snapshot means the account grants nothing, and substituting the
  * bundled list there would advertise models the account cannot call.
  * @param snapshot - parsed snapshot, or undefined when none was ever written.
- * @returns rows in display order.
+ * @returns rows in display order, image models marked.
  */
 export declare function catalogRowsOf(snapshot: CatalogSnapshot | undefined): readonly CatalogModel[];
+/**
+ * Whether one catalog entry answers with an image rather than text.
+ *
+ * A declared output modality is authoritative in both directions; only when the
+ * gateway declares nothing does the known-id table decide.
+ * @param id - model id from the catalog.
+ * @param outputModalities - modalities the catalog declared, or undefined.
+ * @returns true when this entry must be sent to the image endpoint.
+ */
+export declare function isImageModel(id: string, outputModalities?: readonly string[]): boolean;
 /** Route this catalog belongs to. */
 export { PROVIDER_ID };
