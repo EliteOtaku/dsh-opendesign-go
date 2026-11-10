@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { IMAGE_TOOL_NAME, imageModelsOf, resolveImageModel } from '../src/image-tool.ts'
-import { createImageTool, imageBlocks, renderImages } from '../src/image-tool-register.ts'
+import { createImageTool, imageBlocks, registerImageTool, renderImages } from '../src/image-tool-register.ts'
 import type { ToolImage } from '../src/image-tool.ts'
 import type { OpenDesignConfig } from '../src/config-contract.ts'
 
@@ -123,5 +123,38 @@ describe('image tool definition', () => {
       }],
     })
     expect(blocks.map((block) => block.type)).toEqual(['text', 'image'])
+  })
+})
+
+describe('image tool registration', () => {
+  it('is accepted by a real ToolRuntime registry', async () => {
+    // The strongest available check short of a full host: the real service, the
+    // real layers, the real duplicate-name rejection. A definition that only
+    // looks right in a type still fails here.
+    const { Context, Service } = await import('@deepseek-ai/cordis')
+    const { ToolRuntime } = await import('@deepseek-ai/dsh-tools')
+    const hooks: unknown[] = []
+    class SystemPrompt extends Service {
+      static inject: string[] = []
+      constructor(ctx: Context) { super(ctx, 'systemPrompt', true) }
+      tools(fn: unknown): () => void { hooks.push(fn); return () => {} }
+      section(): () => void { return () => {} }
+    }
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt as never, {} as never)
+    await ctx.plugin(ToolRuntime as never, { mode: 'native' })
+    const registry = (ctx as unknown as { tools: { register: (definition: unknown) => () => void } }).tools
+    expect(typeof registry.register).toBe('function')
+
+    const dispose = registerImageTool(
+      { tools: registry } as unknown as Parameters<typeof registerImageTool>[0],
+      {
+        config: () => ({ catalogJson: '', baseURL: 'https://gw.test/v1', apiKeyEnv: 'K', requestTimeoutMs: 1000 }) as unknown as OpenDesignConfig,
+        resolveApiKey: async () => 'sk',
+        attachments: () => undefined,
+      },
+    )
+    expect(typeof dispose).toBe('function')
+    dispose()
   })
 })
