@@ -30,10 +30,33 @@ describe('image tool model selection', () => {
   })
 
   it('honours the enabled list, so a disabled image model is not called', () => {
-    // Hiding a row is opt-in in this plugin; the tool must agree with the picker
-    // rather than quietly using a model the user unticked.
+    // A list that names one image model is a statement about image models: the
+    // one left out was unticked, and the tool must agree with the page rather
+    // than quietly using a model the user turned off.
     const config = configOf(['seedream-5.0', 'gpt-image-2'], ['seedream-5.0', 'gpt-image-2'], ['gpt-image-2'])
     expect(imageModelsOf(config)).toEqual(['gpt-image-2'])
+  })
+
+  it('still generates for a model list saved before image ids existed', () => {
+    // `enabledModels` is only written when the user flips something, so a list
+    // saved by an older build names no image model at all. Reading that as "every
+    // image model is off" would break generation for exactly the users who
+    // customised their picker — which is the reported "generation model does not
+    // work" case.
+    const config = configOf(
+      ['deepseek-v4.1-flash', 'gpt-6-luna', 'seedream-5.0'],
+      ['seedream-5.0'],
+      ['deepseek-v4.1-flash', 'gpt-6-luna'],
+    )
+    expect(imageModelsOf(config)).toEqual(['seedream-5.0'])
+    expect(resolveImageModel(undefined, config)).toBe('seedream-5.0')
+  })
+
+  it('has nothing to offer when the catalog grants no image model', () => {
+    // The other half of the same distinction: an absent image id here is a fact
+    // about the account, not about a switch.
+    const config = configOf(['deepseek-v4.1-flash'], [], ['deepseek-v4.1-flash'])
+    expect(imageModelsOf(config)).toEqual([])
   })
 
   it('uses the first granted model when the call names none', () => {

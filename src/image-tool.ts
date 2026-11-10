@@ -71,16 +71,27 @@ export interface ImageToolDependencies {
 
 /**
  * Image model ids this account may call, in catalog order.
+ *
+ * The settings switch means "show this model in the conversation picker", and an
+ * image model can never appear there — it answers with a picture and no text, so
+ * a turn cannot be routed to it. Reading that switch here would therefore tie the
+ * generation tool to a control that does not describe it.
+ *
+ * It matters for upgrades specifically: `enabledModels` is only written when the
+ * user flips something, so a list saved by a build that predates `imageIds`
+ * contains no image id at all. Treating that as "every image model is off" would
+ * disable generation for exactly the users who have customised their picker. Only
+ * a list that names at least one image model is read as a statement about them.
  * @param config - configuration snapshot carrying the catalog.
- * @returns the enabled image ids; empty when the account has none.
+ * @returns the image ids this account may call; empty when the catalog has none.
  */
 export function imageModelsOf(config: OpenDesignConfig): string[] {
   const rows = catalogRowsOf(parseCatalog(config.catalogJson))
+  const images = rows.filter((row) => row.imageGeneration === true)
   const enabled = config.enabledModels ?? []
-  return rows
-    .filter((row) => row.imageGeneration === true)
-    .filter((row) => enabled.length === 0 || enabled.includes(row.id))
-    .map((row) => row.id)
+  if (enabled.length === 0) return images.map((row) => row.id)
+  const chosen = images.filter((row) => enabled.includes(row.id))
+  return (chosen.length === 0 ? images : chosen).map((row) => row.id)
 }
 
 /**
