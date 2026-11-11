@@ -119,9 +119,9 @@ export function OpenDesignSection({
    *
    * The page has no direct line to the quota reader, but the host already watches
    * this configuration for changes, so writing a fresh nonce both expresses the
-   * request and carries it. `refreshing` is cleared when the reading's timestamp
-   * moves past the moment the button was pressed — not on the write resolving,
-   * because the write succeeds long before the CLI answers.
+   * request and carries it. `refreshing` is cleared when the host reports that a
+   * read finished — not on the write resolving, because the write succeeds long
+   * before the CLI answers.
    */
   const [refreshingSince, setRefreshingSince] = useState<number | undefined>(undefined)
   const refreshQuota = (): void => {
@@ -133,7 +133,10 @@ export function OpenDesignSection({
         console.error('llm-opendesign-go: could not request a quota refresh', error)
       })
   }
-  const usageAt = usage === undefined ? undefined : Date.parse(usage.asOf)
+  // `attemptedAt` moves on every finished read; `asOf` only moves when the read
+  // produced numbers, and a failure now keeps the previous ones, so the reading's
+  // own timestamp would leave this button spinning after a failed refresh.
+  const usageAt = usage === undefined ? undefined : Date.parse(usage.attemptedAt ?? usage.asOf)
   const refreshing = refreshingSince !== undefined
     && (usageAt === undefined || usageAt < refreshingSince)
   useEffect(() => {

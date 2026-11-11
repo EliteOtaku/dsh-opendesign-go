@@ -37,3 +37,19 @@ export function readDue(input: CadenceInput): boolean {
   if (!input.wantsUsage) return false
   return input.retries < input.maxRetries
 }
+
+/**
+ * Retry budget to carry into the next tick.
+ *
+ * The cap in `readDue` exists for a source that will not answer: it bounds how
+ * many subprocesses one outage may cost. A readable answer therefore has to
+ * clear the streak. Leaving the counter at the cap after a success — which this
+ * module used to do — keeps `readDue` false for the rest of the session, so the
+ * card freezes on that one reading instead of refreshing once an interval.
+ * @param previous - the budget after the previous attempt.
+ * @param usable - whether that attempt produced a reading worth keeping.
+ * @returns the budget the next tick decides with.
+ */
+export function nextRetries(previous: number, usable: boolean): number {
+  return usable ? 0 : previous
+}
