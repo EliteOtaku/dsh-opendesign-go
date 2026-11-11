@@ -2,6 +2,41 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 0.1.24
+
+修额度卡片停在同一次读数上不动，以及一次读取失败就把已有数字清空（[PR #6](https://github.com/EliteOtaku/dsh-opendesign-go/pull/6)，作者 Harvey-Will）。
+
+### 现象
+
+订阅额度卡片的 `usageJson.asOf` 冻结在某一时刻不再推进，此后多次采样都不变；期间偶发整张卡退化成「读取失败」，连上一次能显示的数字一起消失。
+
+### 原因
+
+两个缺陷叠成同一个症状。
+
+**一、读成功之后轮询就停了。** `src/index.ts` 的成功分支把重试计数推到上限（`retries = MAX_USAGE_RETRIES`），而 `src/quota-cadence.ts` 的 `readDue` 判据是 `retries < maxRetries`，于是成功一次后 `readDue` 恒为 false，只剩配置变化还会触发读取。这行赋值在「只有配置变化才读」的原始设计里是对的，60 秒稳态轮询（`SLOW_POLL_MS`）引入后，它把「每分钟读一次」变成了「每个会话只读一次」。
+
+**二、失败快照直接覆盖成功读数。** `refreshUsage` 无条件 `pendingUsage = snapshot`，失败快照的 `windows` 是空数组，于是一次上游 `503 billing_preflight_unavailable` 或一次 vela 超时就把进度条清空。
+
+页面其实早就为这两种状态写了渲染：`QuotaCard` 在有窗口又带 `error` 时显示「部分数据缺失」，胶囊面板显示「上次读取失败，显示的是更早的读数」。但宿主从来没有生成过「有窗口 + 带 error」的快照，这两段是死代码——正好是缺的那半边。
+
+### 改法
+
+1. `nextRetries(previous, usable)`（`src/quota-cadence.ts`）：可用读数把连败计数清零，`maxRetries` 只约束「一直读不出来」的来源。稳态轮询恢复为每分钟一次。
+2. `retainedReading`（`src/usage-contract.ts`）配合 `index.ts`：失败时保留上一次的窗口、钱包、`creditsPerUsd` 与 `asOf`，只叠加新的 `error`。保留读数按账号来源（vela 开关 / `sessionRef` / `workspaceId` / `apiKeyEnv` / 账号表）作用域，切账号不会把上一个账号的额度显示成新账号的。
+3. `attemptedAt`（契约 + `Section.tsx` / `UsagePill.tsx`）：区分「数字是什么时候读到的」与「最后一次尝试什么时候结束」。刷新按钮原先靠 `asOf` 前进判断读取结束；失败保留读数后 `asOf` 不再前进，按钮会空转到 15 秒超时。两个客户端改用 `attemptedAt ?? asOf`，旧缓存没有该字段时行为不变。
+
+### 验证
+
+- 全量 `511` 例通过（47 文件，原 505 + 新增 6）：`nextRetries` 2 例、`retainedReading` 2 例、`parseUsage` 的 `attemptedAt` 1 例，以及 `tests/quota-refresh.spec.ts` 用假定时器跑真实激活路径的集成测试，断言启动读之后第 60 秒、第 120 秒各再读一次。
+- 变异验证：把成功分支改回 `retries = MAX_USAGE_RETRIES` 后该集成测试失败，证明它钉住了这处回归。
+- 门禁五连全绿：`typecheck` → `test` → `compile` → `check:dist` → `verify:load`。CI 的 `hosts` 作业（宿主版本矩阵）同时通过。
+
+### 已知限制
+
+- 保留读数只存在于进程内存：重启后第一次读取若失败，卡片仍显示失败态。要跨重启保留，需要把读数的账号来源也写进缓存，属于另一个改动。
+- 连续失败 6 次后仍会停止轮询（原设计，用于限制 vela 子进程开销），此时旧读数会一直带着「部分数据缺失」提示，直到配置变化或手动刷新。
+
 ## 0.1.23
 
 修配置页在「配置值与已装版本不匹配」时的误导性提示。
