@@ -302,9 +302,21 @@ export function OpenDesignSection({
 
       {snapshot.status === 'unavailable' && (
         <div className={cx(styles.notice, styles.noticeWarn)}>
-          <span>宿主未暴露本插件的配置项（namespace: {PROFILE_ENTRY_ID}）。</span>
+          <div className={styles.noticeTitle}>⚠ 宿主没有注册本插件的配置项</div>
+          <ul className={styles.noticeList}>
+            <li>
+              最可能是<b>插件没有激活</b>：配置值与已装版本不匹配时，宿主会拒绝加载整条配置，
+              并在日志留下 <code>ValidationError: invalid config</code>。
+              本版本支持的协议值是 <code>{PROTOCOL_IDS.join(' / ')}</code>，可与 profile 里的
+              <code>protocol</code> 比对。
+            </li>
+            <li>插件刚装完还没重启桌面端——刷新界面不生效。</li>
+            <li>profile 的 <code>dsh.profile.bundles</code> 缺少 <code>dsh-opendesign-go</code>，或该条目被禁用。</li>
+          </ul>
           <span className={styles.noticeFoot}>
-            诊断：{snapshot.status} / revision={String(snapshot.revision)} / writable={String(snapshot.writable)}
+            确认方法：在宿主日志（<code>~/.dsh/logs/desktop-next.log</code>）里搜
+            <code>opendesign-go</code> 与 <code>invalid config</code>。
+            诊断：{snapshot.status} / namespace={PROFILE_ENTRY_ID} / revision={String(snapshot.revision)} / writable={String(snapshot.writable)}
           </span>
           <div className={styles.inlineActions}><Button onClick={retry}>重新加载</Button></div>
         </div>

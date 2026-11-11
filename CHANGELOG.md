@@ -2,6 +2,57 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 0.1.23
+
+修配置页在「配置值与已装版本不匹配」时的误导性提示。
+
+### 现象
+
+设置页显示：
+
+```
+宿主未暴露本插件的配置项（namespace: opendesign-go）
+诊断：unavailable / revision=undefined / writable=true
+```
+
+按这句话排查会走向「插件没装好」「profile 条目丢了」这些方向，但真实原因在别处。
+
+### 真实原因
+
+`writable=true` 说明宿主本身正常。`unavailable` 只在一种情况下出现——宿主的 `describe()` 返回的条目里找不到这个 namespace：
+
+```js
+const view = mirrored.view.namespaces.find((c) => c.ns === this.spec.namespace)
+if (view === void 0) { draft.status = "unavailable"; draft.writable = writable; return }
+```
+
+而条目消失的常见原因是**配置解码失败**：配置里存了当前版本不认识的枚举值，宿主拒绝加载整条配置：
+
+```
+opendesign-go (dsh-opendesign-go): ValidationError: invalid config:
+  - $.protocol expected "chat" | "responses" but got "anthropic"
+```
+
+实测本次就是这样：profile 里装的是 0.1.20，配置却写着 `protocol: anthropic`（0.1.22 才支持）。插件因此完全不激活，模型报 `no adapter registered for provider "dsh-opendesign-go"`。
+
+### 改法
+
+`unavailable` 分支不再只报「宿主未暴露」，改为按可能性列出原因，并把排查线索直接写给用户：
+
+- **配置值与已装版本不匹配**（最常见）——并**列出本版本支持的协议值**（`chat / responses / anthropic`），用户可以拿它跟 profile 里的 `protocol` 直接比对，不需要翻源码。
+- 刚装完还没重启桌面端——刷新界面不生效。
+- `dsh.profile.bundles` 缺条目，或条目被禁用。
+
+同时给出确认方法：在 `~/.dsh/logs/desktop-next.log` 里搜 `opendesign-go` 与 `invalid config`。诊断行保留 `status / namespace / revision / writable` 四个值。
+
+### 为什么不做成「页面直接显示宿主的校验错误」
+
+做不到。校验失败时该条目根本不在 `describe()` 结果里，页面拿不到错误正文——错误只出现在宿主日志。所以这里能做的是**把最可能的原因和比对依据摆出来**，而不是复述宿主消息。
+
+### 验证
+
+新增 1 例渲染测试，断言 `unavailable` 时页面必须出现「配置值与已装版本不匹配」「ValidationError: invalid config」、支持的协议值清单，以及日志路径。全量 `505` 例通过。
+
 ## 0.1.22
 
 修设置页「一键更新」必定失败：点下去报 `client api: pluginManager/listVersions expected 2 business argument(s) plus an optional AbortSignal, got 1`。

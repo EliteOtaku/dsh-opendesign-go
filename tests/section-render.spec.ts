@@ -135,6 +135,24 @@ describe('settings section', () => {
     expect(html).toContain('改参数')
   })
 
+  it('explains an unavailable config by naming a version mismatch, not just "not exposed"', () => {
+    // The failure this pins down: a config value the running build cannot decode
+    // makes the host refuse the whole entry, and the page used to say only
+    // "宿主未暴露本插件的配置项" — which reads as "the plugin is not installed"
+    // and sends the user looking in the wrong place. The real cause is visible
+    // only in the host log, so the page has to name that possibility itself and
+    // tell the reader where to confirm it.
+    const html = render(BASE, { status: 'unavailable' })
+
+    expect(html).toContain('宿主没有注册本插件的配置项')
+    expect(html).toContain('配置值与已装版本不匹配')
+    expect(html).toContain('ValidationError: invalid config')
+    // The supported values are printed so the reader can compare them with the
+    // profile's own `protocol` value without opening any source file.
+    expect(html).toContain('chat / responses / anthropic')
+    expect(html).toContain('desktop-next.log')
+  })
+
   it('shows the unread quota state instead of an empty bar', () => {
     const html = render(BASE)
     expect(html).toContain('尚未读取')
