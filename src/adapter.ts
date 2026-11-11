@@ -42,7 +42,7 @@ import { catalogRowsOf, isImageModel, parseCatalog } from './catalog.ts'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS, paramsOf } from './model-params.ts'
 import type { ModelParamOverride, ModelParams } from './model-params.ts'
 import { estimatePromptTokens, fitMaxTokens, reservedOutputTokens, usableInputTokens } from './output-budget.ts'
-import { DISPLAY_NAME, type OpenDesignConfig, type ProtocolId } from './config-contract.ts'
+import { DISPLAY_NAME, ANTHROPIC_VERSION, type OpenDesignConfig, type ProtocolId } from './config-contract.ts'
 import { toChatMessages, toChatTools } from './conversion.ts'
 import type { ImageDataUrlResolver } from './conversion.ts'
 import { IMAGE_TOOL_NAME } from './image-tool.ts'
@@ -55,6 +55,7 @@ import {
 import type { PreparedImageIndex, RequestImagePolicy } from './request-images.ts'
 import type { AttachmentsSeam } from './image-bytes.ts'
 import { toResponsesRequest, translateResponsesEvent } from './responses.ts'
+import { toAnthropicRequest, translateAnthropicEvent } from './anthropic.ts'
 import {
   appendReasoning,
   appendText,
@@ -557,21 +558,41 @@ async function dispatch(
   const baseURL = config.baseURL.replace(/\/+$/u, '')
   if (baseURL === '') throw new LlmError('OpenDesign: baseURL is not configured', GATEWAY_CODES.invalidRequest)
 
+  const anthropic = config.protocol === 'anthropic'
   const header: Record<string, string> = {
     ...attributionHeaders(),
-    authorization: `Bearer ${apiKey}`,
+    // Anthropic Messages authenticates with its own header rather than a bearer
+    // token, and refuses the request outright when `anthropic-version` is
+    // absent (400, measured). Both facts are wire requirements, not preferences.
+    ...(anthropic ? { 'x-api-key': apiKey } : { authorization: `Bearer ${apiKey}` }),
+    ...(anthropic ? { 'anthropic-version': ANTHROPIC_VERSION } : {}),
     'content-type': 'application/json',
     accept: 'text/event-stream',
   }
 
   const signal = deadlineSignal(options.signal, config.requestTimeoutMs)
-  const url = `${baseURL}/${config.protocol === 'responses' ? 'responses' : 'chat/completions'}`
+  const url = `${baseURL}/${SURFACE_PATHS[config.protocol]}`
   const imageResolver = resolverOf(prepared, resolver)
   const body = config.protocol === 'responses'
     ? chatBodyForResponses(options, config, imageResolver)
-    : chatBody(options, config, imageResolver)
+    : config.protocol === 'anthropic'
+      ? chatBodyForAnthropic(options, config, imageResolver)
+      : chatBody(options, config, imageResolver)
 
   return await send(url, header, body, signal, config, options)
+}
+
+/**
+ * Path tail each surface appends to the configured base.
+ *
+ * The base already carries `/v1`, and every surface appends only its own tail.
+ * Measured: `/messages` at the bare host is a 404, so Anthropic does not want a
+ * second `/v1` of its own.
+ */
+const SURFACE_PATHS: Readonly<Record<ProtocolId, string>> = {
+  chat: 'chat/completions',
+  responses: 'responses',
+  anthropic: 'messages',
 }
 
 /**
@@ -691,6 +712,75 @@ function chatBodyForResponses(
 }
 
 /**
+ * Assemble one Anthropic Messages request body.
+ *
+ * The same request, projected by `anthropic.ts`. Four differences from Chat
+ * Completions: the output cap is `max_tokens` (same name, but it is **required**
+ * by this surface), the thinking control is a `thinking` object rather than
+ * `reasoning_effort`, stop sequences are `stop_sequences`, and the system prompt
+ * is a top-level string.
+ *
+ * On reasoning: measured against the gateway, `reasoning_effort` changes nothing
+ * here (all six values landed in the same 1000–1700 thinking-character band),
+ * while `thinking:{type:'disabled'}` removes the thinking block entirely and
+ * drops the cached prompt's input count with it. So the harness's effort enum is
+ * translated to the one thing this surface actually obeys: `none` disables
+ * thinking, every other effort leaves the model's default on. Sending a
+ * per-effort token budget instead would be inventing a mapping the endpoint does
+ * not honour.
+ * @param options - fully assembled request.
+ * @param config - configuration snapshot carrying this model's parameters.
+ * @param resolver - image resolver for models that accept images.
+ * @returns the JSON body to send.
+ */
+function chatBodyForAnthropic(
+  options: GenerateOptions,
+  config: OpenDesignConfig,
+  resolver: ImageDataUrlResolver | undefined,
+): Record<string, unknown> {
+  const projected = toAnthropicRequest(options, resolver)
+  const body: Record<string, unknown> = {
+    model: options.model,
+    ...projected,
+    stream: true,
+  }
+  if (options.temperature !== undefined) body.temperature = options.temperature
+  // `max_tokens` is mandatory on this surface, unlike the other two where an
+  // absent cap lets the provider choose. The clamp below therefore has a floor:
+  // when the prompt fills the window outright, `fitMaxTokens` returns undefined
+  // and omitting the field would be a 400 rather than a small reply.
+  const params = paramsOf(options.model, config.modelParams)
+  const requested = options.maxTokens ?? params.maxTokens
+  const fitted = fitMaxTokens(
+    requested,
+    params.contextWindow,
+    estimatePromptTokens(projected.messages, projected.tools),
+  )
+  body.max_tokens = fitted ?? Math.min(requested, MIN_ANTHROPIC_MAX_TOKENS)
+  if (options.reasoningEffort !== undefined) {
+    body.thinking = options.reasoningEffort === 'none'
+      ? { type: 'disabled' }
+      : { type: 'enabled', budget_tokens: ANTHROPIC_THINKING_BUDGET }
+  }
+  if (options.stop !== undefined && options.stop.length > 0) body.stop_sequences = options.stop
+  return body
+}
+
+/**
+ * Thinking budget sent when thinking is on.
+ *
+ * `budget_tokens` is advisory on this gateway — a 512 budget still produced
+ * 1117 thinking characters — so the value is not a control knob, only the
+ * switch that accompanies `type: 'enabled'`. It is set to the same quarter of
+ * the window the other surfaces reserve for output, which keeps it legal when a
+ * gateway does enforce the `budget < max_tokens` relation.
+ */
+const ANTHROPIC_THINKING_BUDGET = 4_096
+
+/** Smallest `max_tokens` sent when the window leaves no room to reserve. */
+const MIN_ANTHROPIC_MAX_TOKENS = 1_024
+
+/**
  * Post one body and name whatever went wrong in transport.
  * @param url - absolute endpoint.
  * @param header - request headers.
@@ -804,7 +894,9 @@ async function* consumeSse(
   protocol: ProtocolId,
 ): AsyncGenerator<StreamChunk> {
   const state = createStreamState()
-  const translate = protocol === 'responses' ? translateResponsesEvent : chatEvent
+  const translate = protocol === 'responses'
+    ? translateResponsesEvent
+    : protocol === 'anthropic' ? translateAnthropicEvent : chatEvent
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''

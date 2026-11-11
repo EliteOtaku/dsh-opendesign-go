@@ -116,11 +116,14 @@ export function estimatePromptTokens(
     }
     if (value === null || typeof value !== 'object') return
     const record = value as Record<string, unknown>
-    // Both surfaces name the image part differently: Chat Completions carries
+    // Each surface names the image part differently: Chat Completions carries
     // `{type:'image_url', image_url:{url}}`, Responses carries
-    // `{type:'input_image', image_url:'data:…'}`. Either way the payload is a
-    // base64 data URL whose text length has nothing to do with its cost.
-    if (record.type === 'image_url' || record.type === 'input_image') {
+    // `{type:'input_image', image_url:'data:…'}`, Anthropic carries
+    // `{type:'image', source:{data}}`. Either way the payload is a base64 data
+    // URL whose text length has nothing to do with its cost — and for Anthropic
+    // the payload sits one level down, so missing this branch would charge a
+    // screenshot by the length of its base64 and starve the request's budget.
+    if (record.type === 'image_url' || record.type === 'input_image' || record.type === 'image') {
       images += 1
       return
     }

@@ -2,6 +2,75 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 0.1.22
+
+修设置页「一键更新」必定失败：点下去报 `client api: pluginManager/listVersions expected 2 business argument(s) plus an optional AbortSignal, got 1`。
+
+### 原因
+
+宿主网关按**参数个数**校验每一次 Remote 调用，判据是端点声明了几个参数：
+
+```js
+const expected = descriptor.parameters.length - (projection?.parameterIndex === void 0 ? 0 : 1)
+if (values.length !== expected && !hasCallerSignal) throw new Error(...)
+```
+
+关键在于 `parameters.length` **包含 TypeScript 标成可选的那些**。`listVersions` 声明两个参数（`name`、`options`），`options` 标了可选、也标了 `acceptsUndefined: true`，但那个标记只放宽**值**的检查，不放宽**个数**。插件只传了 `name`，于是 1 ≠ 2，在值被解码之前就抛错。
+
+这个错误在编译期看不见：TypeScript 的 `options?:` 语法让 `listVersions(name)` 完全合法。所以它一路通过 typecheck 和全部单测，只在用户点按钮时暴露。
+
+### 改法
+
+1. 调用点显式补占位实参：`listVersions(PACKAGE_NAME, undefined)`。`undefined` 能通过 strict codec（该端点声明的是 `z.union([z.undefined(), …])`），语义正好是「不指定 registry」。
+2. 接口签名把可选槽位写成**必填但可为 undefined**（`options: {...} | undefined`），让编译器以后能拦住同样的疏漏，而不是继续放行。
+3. 审计同类调用：`updateBundle`（3 个参数）、`removeBundle`（1 个）、`installBundle`（2 个）、`settings.describe`（0 个）、`settings.update`（3 个）、`credentials.set`（2 个）、`credentials.unset`（1 个）——均与宿主声明一致，只有 `listVersions` 少一个。
+
+### 验证
+
+- 新增 5 例接口约定测试：用一个按宿主同款规则（参数个数必须严格相等）校验的假网关，直接复现原报错。断言 `listVersions` 收到 `(name, undefined)`、`updateBundle` 收到 3 个实参、`removeBundle`/`installBundle` 各 1/2 个。
+- 全量 `504` 例通过（原 499 + 新增 5），`typecheck` / `compile` / `check:dist` / `verify:load` 全绿。
+
+## 0.1.21
+
+新增第三种接口协议 Anthropic Messages，设置页「接口协议」里排在 Responses 右边。
+
+### 起因
+
+宿主 0.2.2 起对工具调用参数改成严格校验：模型偶尔在一次调用里连出两段 `{…}{…}`，旧版只执行第一段照常往下跑，新版直接判格式错误、整轮失败且不自动重试。这是模型吐出的文本问题，插件改不了；但飞书群里反馈切到 Anthropic 协议可以避开，于是做成可选协议。
+
+### 新增
+
+`src/anthropic.ts` 承载这一面的请求投影与事件翻译，与 `responses.ts` 同构：`stream-state.ts` 仍是唯一的累加器，协议层只翻译自己的事件形状。
+
+端点 `POST {baseURL}/messages`。四处必须与 OpenAI 两个面区别对待，全部实测确认：
+
+| 项 | 事实 |
+| --- | --- |
+| 鉴权 | `x-api-key`，不是 `Authorization: Bearer`；缺 `anthropic-version` 头返回 400 |
+| 思考控制 | `thinking: {type:'disabled'}` 才真关；`reasoning_effort` 六档实测 thinking 长度都在 1000–1700 字符同一区间，完全无效 |
+| 输出上限 | `max_tokens` 必填，不能像另两面那样省略 |
+| usage | `input_tokens` **不含**缓存读，缓存另给 `cache_read_input_tokens` |
+
+### 思考等级怎么映射
+
+思考等级选「关闭」→ 发 `thinking: {type:'disabled'}`；其余档位 → `{type:'enabled', budget_tokens}`。不做逐档预算映射，因为该网关不认 `budget_tokens`（给 512 仍产出 1117 字符思考），按档位编一个假映射只会误导。
+
+### usage 的坑
+
+OpenAI 两个面的 `prompt_tokens`/`input_tokens` 是**含**缓存的总和，所以共用换算要减掉缓存。Anthropic 是分开报的，直接套用会减掉一个从未加进去的数，把输入 token 算少。实测重复长 prompt：冷启动 2677，第二次 245 输入 + 2432 缓存读，两者相加正好 2677 —— 这是分开计数的直接证据。因此单独实现 `anthropicUsage`。
+
+图片识别也做了对应处理：`{type:'image', source:{data}}` 的成本按每图上限计，`output-budget.ts` 补了这一支，否则一张截图会按 base64 字符长度计价，把请求预算吃光。
+
+### 关于「能否避开双段参数」
+
+不能承诺。双段 `{…}{…}` 是模型侧输出，判定发生在宿主解析工具参数时，与请求走哪条路径无关，插件这一层修不了。Anthropic 面只是社区反馈的规避路径，同时也是唯一能拿到原始思维链的备选（Responses 只给改写摘要）。
+
+### 验证
+
+- 门禁五连全绿：`typecheck` → `test`（46 文件 **499** 例，新增 21 例）→ `compile` → `check:dist` → `verify:load`。
+- 实机三协议同题对比（真实网关、同一条工具调用 prompt）：chat 1945ms / responses 1368ms / anthropic 2357ms，三者都正确产出 `get_weather{"city": "北京"}`。Anthropic 面额外拿到 54 字符思考，且 usage 报出 128 token 缓存读。
+- 多轮工具往返（assistant tool_use → tool_result → 最终答复）在 chat 与 anthropic 两面均跑通，Anthropic 面正常读到 `晴，28℃` 并作答。
+
 ## 0.1.20
 
 修长会话图片撑爆请求体，以及生图模型选中就报错（[PR #4](https://github.com/EliteOtaku/dsh-opendesign-go/pull/4)，作者 BaxterL）。

@@ -20,7 +20,7 @@
 | 功能 | 说明 |
 | --- | --- |
 | 接入 Go 套餐 | 注册一个 `dsh-opendesign-go` provider，提供 Design Plan 的 14 个模型 |
-| 两条接口协议 | 同一网关的 `chat/completions` 与 `responses` 可切换，默认前者；后者只返回被改写的思考摘要 |
+| 三条接口协议 | 同一网关的 `chat/completions`、`responses` 与 Anthropic `messages` 可切换，默认第一条；Responses 只返回被改写的思考摘要 |
 | 一键更新 | 设置页直接调插件的更新通道：主路径走 npm registry，另有「从 GitHub 装」作为兜底 |
 | 用量统计 | 记录每次经本插件发出的请求，按模型汇总输入/输出/缓存 token，并按各厂商公开单价估算成本 |
 | 额度读取 | 勾选后调用本机 OpenDesign 桌面端自带的 `vela` 命令行，读取真实的 5 小时 / 7 天额度窗口 |
@@ -46,7 +46,7 @@
 | 宿主版本 | `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.2` 三版全部通过 | `npm run test:hosts`，每版在临时目录装齐 12 个 peer，再查符号 / 类型 / 挂载三层 |
 | 网关上下文 | 真实窗口 1,048,576 token，未缩容 | 二分探测：喂 1,036,038 token 返 200，1,053,038 返 400 |
 | 图片输入 | 声明 `image` 的 12 个模型全部能收图并正确识别 | 逐模型发同一张纯色 PNG，直连与经中间件两条链路各跑一遍 |
-| 两条协议 | `chat/completions` 与 `responses` 都能流式、带工具、带图；思考内容只有前者是原始思维链 | 同一批 prompt 各跑一遍，逐事件比对形状与 `reasoning_tokens` |
+| 三条协议 | `chat/completions`、`responses`、Anthropic `messages` 都能流式、带工具、带图；思考内容只有 Responses 是被改写的摘要 | 同一批 prompt 各跑一遍，逐事件比对形状与 `reasoning_tokens`；Anthropic 另验 `x-api-key`/`anthropic-version` 头与 `thinking` 开关 |
 | 参数表 | 14 个模型的窗口与输出上限逐条对应厂商文档；`deepseek-v4.1-flash-eco` 与 `minimax-m3.1-flash` 的输出上限无厂商文档，依据实测 | 出处逐条列在 [docs/models.md](docs/models.md) |
 | 额度口径 | credits 与美元 10,000 : 1；5 小时 50,000、7 天 150,000 | 两个窗口独立折算互证，与 `vela` 输出一致；另用 DeepSeek 调用的 credit 增量五次复核，落在 10,067–11,880 |
 | 工具侧图片 | 图片改由紧随其后的 `user` 消息承载，直连与经中间件都到达模型 | 同一条工具结果在两种链路下逐模型比对 |
@@ -190,18 +190,30 @@ API Key 保存在 DSH 凭据服务里，设置页只显示引用名，不回显�
 
 ## 接口协议
 
-同一个网关提供两条 OpenAI 风格的接口，设置页的「启用 OpenDesign Go」卡片里可以切换，默认 `chat`：
+同一个网关提供三条接口，设置页的「启用 OpenDesign Go」卡片里可以切换，默认 `chat`：
 
 | 协议 | 端点 | 思考内容 |
 | --- | --- | --- |
 | Chat Completions | `POST {baseURL}/chat/completions` | `reasoning_content` 是模型自己的完整思维链 |
 | Responses | `POST {baseURL}/responses` | 只有 `summary`，是被截断改写的摘要 |
+| Anthropic Messages | `POST {baseURL}/messages` | `thinking_delta` 是模型自己的完整思维链 |
+
+三条走同一份额度、计价相同，区别只在线上形状。
+
+**Anthropic 的线格式与 OpenAI 不同，四处必须照做**（都已实测，照官方 SDK 的默认行为写会撞墙）：
+
+- 鉴权是 `x-api-key` 而不是 `Authorization: Bearer`；缺少 `anthropic-version` 头直接 400。插件已把这两项固定进请求头。
+- 参数是 `thinking: {type:'disabled'}` 控制思考。`reasoning_effort` 在这个面上**完全无效**——六档取值实测 thinking 长度都落在 1000–1700 字符的同一区间，而 `thinking: disabled` 真把思考块拿掉了。所以插件的映射是：思考等级选「关闭」→ 发 `disabled`，其余档位 → `enabled`（该网关的 `budget_tokens` 只是陪衬，给 512 也能产出 1117 字符思考）。
+- `max_tokens` 是必填。另两条协议省略它会让服务端自己挑，这条不行，所以窗口塞满时也仍会发一个下限值。
+- usage 口径不同：这里的 `input_tokens` **不含缓存读**，缓存另有 `cache_read_input_tokens`。实测重复长 prompt：冷启动 2677，第二次 245 输入 + 2432 缓存读，两者相加正好等于冷启动值——这是「分开计数」的直接证据。OpenAI 那两个面是把它折进总和的，所以不能共用同一段换算。
+
+关于「换 Anthropic 能绕开双段工具参数报错」这个说法：那个问题出在**模型吐出的文本**（一次工具调用里连出两段 `{…}{…}`），由宿主侧的严格 JSON 解析判定失败，与请求走哪条路径无关。插件这一层无法修它。但 Anthropic 面确实是社区反馈的规避路径，也是唯一能拿到原始思维链的备选，所以做成了可选协议；遇到就切过去试，别指望它必然不再犯。
 
 三条实测结论决定了默认值：
 
-- **计费与额度消耗相同**，两条路径走的是同一个模型、同一份额度。
-- **换过去会降级思考显示**：`/responses` 的思考和文本一样是流式增量，但增量内容是对思维过程的**改写摘要**，不是原始思维链。插件把思考块渲染给用户，所以少掉这段是可见的质量损失。
-- **省额度问题两边一样**：预算紧张时空回答的来源是思考 token 吃光 `max_tokens`，与协议无关（同一组英文 prompt，预算 24 时 chat 7/12 空、responses 9/12 空）。
+- **计费与额度消耗相同**，三条路径走的是同一个模型、同一份额度。
+- **换到 Responses 会降级思考显示**：`/responses` 的思考和文本一样是流式增量，但增量内容是对思维过程的**改写摘要**，不是原始思维链。插件把思考块渲染给用户，所以少掉这段是可见的质量损失。Anthropic 与 Chat 一样返回原始思维链。
+- **省额度问题各面都一样**：预算紧张时空回答的来源是思考 token 吃光 `max_tokens`，与协议无关（同一组英文 prompt，预算 24 时 chat 7/12 空、responses 9/12 空）。
 
 真正需要 Responses 的场合是它的截断信号：它给 `status: "incomplete"` + `incomplete_details.reason`，而 Chat 只有 `finish_reason`。插件已经把两者都映射成同一个 `max-tokens` 停止原因。
 

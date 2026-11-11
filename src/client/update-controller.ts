@@ -86,18 +86,41 @@ interface ChangeResult {
   readonly restartReason?: string
 }
 
-/** The subset of `remote.pluginManager` this page calls. */
+/**
+ * The subset of `remote.pluginManager` this page calls.
+ *
+ * Every optional parameter is declared **required but nullable** on purpose.
+ * The Host gateway counts the parameters a method declares and rejects a call
+ * whose argument count differs:
+ *
+ * ```
+ * const expected = descriptor.parameters.length - (projection ? 1 : 0)
+ * if (values.length !== expected && !hasCallerSignal) throw new Error(
+ *   `client api: ${endpoint} expected ${expected} business argument(s) …, got ${values.length}`,
+ * )
+ * ```
+ *
+ * `parameters` includes the ones the Host's TypeScript signature marks
+ * optional — `acceptsUndefined` relaxes the *value* check, not the count — so
+ * `listVersions(name)` fails with "expected 2 business argument(s) …, got 1".
+ * Passing `undefined` explicitly satisfies the count and the codec accepts it.
+ * TypeScript's `options?:` syntax is what made this invisible at compile time,
+ * which is why the signatures below spell the slots out.
+ */
 interface PluginManagerRemote {
-  listVersions(name: string, options?: { registry?: string | null }): Promise<RemoteResult<VersionList>>
+  listVersions(
+    name: string,
+    options: { registry?: string | null } | undefined,
+  ): Promise<RemoteResult<VersionList>>
   updateBundle(
     name: string,
     version: string,
-    options?: { registry?: string | null, requestId?: string },
+    options: { registry?: string | null, requestId?: string } | undefined,
   ): Promise<RemoteResult<UpdateResult>>
   removeBundle(name: string): Promise<RemoteResult<ChangeResult>>
   installBundle(
     spec: string,
-    options?: { enabled?: boolean, requestId?: string },
+    options: { enabled?: boolean, requestId?: string } | undefined,
   ): Promise<RemoteResult<ChangeResult>>
 }
 
@@ -214,7 +237,11 @@ export function updateCommands(ctx: ClientContext): {
       // Asking first turns "install failed" into a specific reason: the Host
       // checks DSH compatibility per version and reports which requirement the
       // running build misses.
-      const listing = unwrap(await pluginManager.listVersions(PACKAGE_NAME))
+      // The second argument is required by the call convention even though the
+      // Host treats it as optional: the gateway compares the argument count with
+      // the declared parameter list, so omitting it fails before the value is
+      // ever validated. `undefined` means "no registry preference".
+      const listing = unwrap(await pluginManager.listVersions(PACKAGE_NAME, undefined))
       if (listing.status === 'refused') {
         return { ok: false, message: `读不到可用版本（${listing.problem}）：${listing.reason}` }
       }

@@ -16,7 +16,7 @@ export declare const DISPLAY_NAME = "OpenDesign Go";
  * a single file with no reliable path back to its own package, and the update
  * check needs a value it can compare without filesystem access.
  */
-export declare const PLUGIN_VERSION = "0.1.20";
+export declare const PLUGIN_VERSION = "0.1.22";
 /** Settings namespace this plugin installs and the Web page edits. */
 export declare const SETTINGS_NAMESPACE = "llm-opendesign-go";
 /**
@@ -25,21 +25,42 @@ export declare const SETTINGS_NAMESPACE = "llm-opendesign-go";
  */
 export declare const PROFILE_ENTRY_ID = "opendesign-go";
 /**
- * OpenAI-compatible inference base. Anthropic Messages uses the same host
- * without the `/v1` suffix; the SDK appends `/v1/messages` itself.
+ * Inference base shared by every surface.
+ *
+ * All three paths hang off this one prefix, because each surface appends only
+ * its own tail: `/chat/completions`, `/responses`, `/messages`. Measured against
+ * the gateway, the bare host answers 404 for `/messages` while `…/v1/messages`
+ * answers 200, so Anthropic needs no separate base of its own as long as this
+ * one keeps the `/v1` suffix.
  */
 export declare const DEFAULT_BASE_URL = "https://amr-link.open-design.ai/v1";
+/**
+ * `anthropic-version` header every Anthropic Messages request must carry.
+ *
+ * Not optional: the gateway answers 400 `anthropic-version header is required`
+ * without it, which would otherwise read as a malformed request.
+ */
+export declare const ANTHROPIC_VERSION = "2023-06-01";
 /** Environment variable resolving the OpenDesign API key by default. */
 export declare const DEFAULT_API_KEY_ENV = "OPENDESIGN_API_KEY";
 /**
  * Inference surfaces this route can speak.
  *
- * Both are served by the same host; only the path and the wire shape differ.
- * Values are persisted, so they are stable strings rather than an ordinal.
+ * All three are served by the same host and billed identically; only the path
+ * and the wire shape differ. Values are persisted, so they are stable strings
+ * rather than an ordinal.
+ *
+ * `anthropic` is not mere variety. The harness parses the tool-call arguments
+ * this adapter streams with its own strict JSON parser, so a model that emits
+ * two concatenated objects inside one call fails the whole turn on hosts that
+ * validate strictly. That is a property of the text the model produced, not of
+ * the path it travelled, so no surface here can repair it — but the Anthropic
+ * surface is the one reported to avoid it, and it is also the only surface that
+ * streams the model's own thinking (`thinking_delta`) instead of a rewrite.
  */
-export type ProtocolId = 'chat' | 'responses';
+export type ProtocolId = 'chat' | 'responses' | 'anthropic';
 /** Every {@link ProtocolId}, in the order the settings page offers them. */
-export declare const PROTOCOL_IDS: readonly ["chat", "responses"];
+export declare const PROTOCOL_IDS: readonly ["chat", "responses", "anthropic"];
 /**
  * Surface used until the user picks another.
  *

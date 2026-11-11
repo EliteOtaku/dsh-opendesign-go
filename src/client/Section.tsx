@@ -345,7 +345,7 @@ export function OpenDesignSection({
         </Row>
         <Row
           label="接口协议"
-          hint="两条协议由同一网关提供、计费相同。Chat Completions 会返回模型自己的完整思维链；Responses 只返回被改写的摘要，且预算紧张时空回答略多。"
+          hint="三条协议由同一网关提供、计费相同。Chat Completions 与 Anthropic 都返回模型自己的完整思维链；Responses 只返回被改写的摘要，且预算紧张时空回答略多。"
         >
           <div className={styles.protocolPicker}>
             {PROTOCOL_IDS.map((id) => (
