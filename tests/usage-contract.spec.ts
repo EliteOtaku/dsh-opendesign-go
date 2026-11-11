@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   creditsToNumber,
   percentUsedOf,
+  retainedReading,
   windowLabel,
 } from '../src/usage-contract.ts'
 import type { QuotaWindow, UsageSnapshot } from '../src/usage-contract.ts'
@@ -56,6 +57,57 @@ describe('percentUsedOf', () => {
   it('returns null when the limit cannot support a percentage', () => {
     expect(percentUsedOf('10', '0')).toBeNull()
     expect(percentUsedOf('x', '120')).toBeNull()
+  })
+})
+
+describe('retainedReading', () => {
+  const good: UsageSnapshot = {
+    asOf: '2026-11-11T09:00:15.251Z',
+    tier: 'go',
+    eligible: true,
+    windows: [
+      {
+        status: 'ok',
+        durationSeconds: 18000,
+        usedCredits: '11485',
+        limitCredits: '50000',
+        remainingCredits: '38515',
+        percentUsed: 23,
+        resetsAt: '2026-11-11T12:43:19.840Z',
+      },
+    ],
+    wallet: { balanceUsd: '1.00' },
+    creditsPerUsd: 10_000,
+  }
+
+  it('keeps the last numbers and the time they were read', () => {
+    // A failed read has no quota to report. Publishing it as-is emptied the
+    // card, so one transient upstream 503 looked like a broken setup; the page
+    // already renders "部分数据缺失" plus the reading's own timestamp.
+    const failed: UsageSnapshot = {
+      asOf: '2026-11-11T09:12:00.000Z',
+      tier: '',
+      eligible: false,
+      windows: [],
+      error: 'vela billing funding-check failed: 503 billing_preflight_unavailable',
+    }
+    const reading = retainedReading(good, failed)
+    expect(reading.windows).toHaveLength(1)
+    expect(reading.wallet?.balanceUsd).toBe('1.00')
+    expect(reading.creditsPerUsd).toBe(10_000)
+    // The numbers keep the time they were actually read, so the page can say
+    // they are older than they look instead of presenting them as current.
+    expect(reading.asOf).toBe('2026-11-11T09:00:15.251Z')
+    expect(reading.error).toBe(failed.error)
+  })
+
+  it('never returns stale figures without saying they are stale', () => {
+    // A failure without a message would leave the page showing old bars as if
+    // they were current; the fallback keeps that from happening.
+    const reading = retainedReading(good, {
+      asOf: '2026-11-11T09:12:00.000Z', tier: '', eligible: false, windows: [],
+    })
+    expect(reading.error).toBe('额度读取失败')
   })
 })
 

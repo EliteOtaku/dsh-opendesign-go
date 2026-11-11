@@ -65,6 +65,16 @@ export interface UsageSnapshot {
   readonly creditsPerUsd?: number
   /** Set when the quota channel is configured but the last read failed. */
   readonly error?: string
+  /**
+   * When the last read was *attempted*, ISO timestamp.
+   *
+   * Separate from `asOf` because they answer different questions once a failure
+   * keeps the previous numbers: `asOf` is how old the figures are, `attemptedAt`
+   * is whether the page is still waiting on a read it asked for. The page uses
+   * `attemptedAt` to settle the refresh button, so a failed attempt ends the
+   * wait instead of leaving it to time out.
+   */
+  readonly attemptedAt?: string
 }
 
 /**
@@ -189,6 +199,7 @@ export function parseUsage(raw: string | undefined): UsageSnapshot | undefined {
     eligible: row.eligible,
     windows,
     ...(typeof row.error === 'string' ? { error: row.error } : {}),
+    ...(typeof row.attemptedAt === 'string' ? { attemptedAt: row.attemptedAt } : {}),
   }
   if (typeof row.creditsPerUsd === 'number' && row.creditsPerUsd > 0) {
     result = { ...result, creditsPerUsd: row.creditsPerUsd }
@@ -206,4 +217,23 @@ export function parseUsage(raw: string | undefined): UsageSnapshot | undefined {
     }
   }
   return result
+}
+
+/**
+ * Keep the last usable reading across a failed one.
+ *
+ * A failed read has no quota to report, and publishing it as-is replaces a good
+ * reading with an empty one: one flaky minute — an upstream 503, a CLI that
+ * timed out — then reads as a broken setup and drops bars the page could still
+ * show. The kept numbers carry the `asOf` they were actually read at, and the
+ * failure's `error` rides along, so the page can say they are older than they
+ * look instead of presenting them as current.
+ * @param lastGood - the most recent reading that carried windows.
+ * @param failed - the reading that could not produce numbers.
+ * @returns the last usable numbers, plus the failure that interrupted them.
+ */
+export function retainedReading(lastGood: UsageSnapshot, failed: UsageSnapshot): UsageSnapshot {
+  // A failure without a message would be the worst outcome: stale figures with
+  // no sign that they are stale, so the fallback keeps the page honest.
+  return { ...lastGood, error: failed.error ?? '额度读取失败' }
 }

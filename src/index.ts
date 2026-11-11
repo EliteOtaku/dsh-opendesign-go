@@ -35,12 +35,13 @@ import type { RouteDiagnostics } from './diagnostics.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { parseRecoveredProviders, scanSessions } from './session-usage.ts'
-import { readDue } from './quota-cadence.ts'
+import { nextRetries, readDue } from './quota-cadence.ts'
 import { fetchLatestRelease, fetchLatestTag, snapshotOf } from './update-check.ts'
 import { imageResolverOf } from './image-bytes.ts'
 import type { AttachmentsSeam } from './image-bytes.ts'
 import { homedir } from 'node:os'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
+import { retainedReading } from './usage-contract.ts'
 import type { UsageSnapshot } from './usage-contract.ts'
 
 /** How often a failed quota read is retried before giving up for the session. */
@@ -229,6 +230,28 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * 1,440 profile-level file locks a day.
    */
   let pendingUsage: UsageSnapshot | undefined
+  /** Most recent reading that carried numbers, and the source it belongs to. */
+  let lastGoodUsage: { readonly source: string, readonly snapshot: UsageSnapshot } | undefined
+
+  /**
+   * Which subscription a reading describes.
+   *
+   * A failure keeps the previous numbers, and those numbers belong to one
+   * account's plan: after switching account, console session or workspace, the
+   * retained bars would be somebody else's. This key is what the merge checks,
+   * so a configuration change starts from an empty card rather than a stale one
+   * that looks current.
+   * @param config - configuration the read was taken under.
+   * @returns a stable string for the account inputs that decide the read.
+   */
+  const usageSource = (config: OpenDesignConfig): string => [
+    String(config.useVelaCredential),
+    config.sessionRef,
+    config.workspaceId,
+    config.apiKeyEnv,
+    ...(config.accounts ?? []).map((account) => `${account.apiKeyEnv}:${account.workspaceId ?? ''}`),
+  ].join('|')
+
   const usageThrottle = createThrottle({
     intervalMs: PUBLISH_MIN_INTERVAL_MS,
     clock: systemClock,
@@ -245,6 +268,10 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
   })
   ctx.effect(() => () => { usageThrottle.dispose() })
 
+  /** A reading that answered with numbers is final; anything else may recover. */
+  const usable = (snapshot: UsageSnapshot | undefined): boolean =>
+    snapshot !== undefined && snapshot.error === undefined && snapshot.windows.length > 0
+
   /**
    * Read the quota channel and publish the result into the config document,
    * which is the channel the page already receives.
@@ -253,8 +280,10 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
    * app's own login and needs nothing from the user; the console-session path is
    * the older one and stays available for anyone who prefers it.
    *
-   * A failure is published too: the page can then say why it has no numbers
-   * instead of showing a stale reading with no explanation.
+   * A failure is published too, so the page can say why the numbers stopped
+   * moving. It keeps the last usable reading instead of replacing it: one failed
+   * attempt should cost the user a stale timestamp and an explanation, not the
+   * bars themselves.
    * @param options - `force` publishes this reading regardless of the throttle,
    * used when the user pressed refresh and is waiting on the result.
    * @returns the reading, published or not.
@@ -281,6 +310,19 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     } else {
       snapshot = await usage.read()
     }
+    if (usable(snapshot)) {
+      lastGoodUsage = { source: usageSource(config), snapshot }
+    } else if (lastGoodUsage !== undefined && lastGoodUsage.source === usageSource(config)) {
+      // Publish what was last known to be true. The page renders this as
+      // "部分数据缺失" with the older `asOf`, and the composer pill adds that the
+      // figures predate the failure — both states exist in the page for exactly
+      // this case, which the empty replacement used to skip.
+      snapshot = retainedReading(lastGoodUsage.snapshot, snapshot)
+    }
+    // `asOf` says when the numbers were read; this says when a read last
+    // finished. They differ when a failure kept the previous numbers, and the
+    // page settles its refresh button on this one.
+    snapshot = { ...snapshot, attemptedAt: new Date().toISOString() }
     pendingUsage = snapshot
     usageThrottle.request(options.force === true)
     ctx.logger.info(`llm-opendesign-go: quota ${usage.describe(snapshot)}`)
@@ -315,10 +357,6 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
       return undefined
     }
   }
-
-  /** A reading that answered with numbers is final; anything else may recover. */
-  const usable = (snapshot: UsageSnapshot | undefined): boolean =>
-    snapshot !== undefined && snapshot.error === undefined && snapshot.windows.length > 0
 
   void refreshIfConfigured()
 
@@ -435,7 +473,7 @@ export function apply(ctx: Context, raw?: Partial<OpenDesignConfig> | LiveConfig
     // someone is waiting on this number, so it is published at once instead of
     // waiting out the publish throttle.
     void refreshIfConfigured({ force: changed }).then((snapshot) => {
-      if (usable(snapshot)) retries = MAX_USAGE_RETRIES
+      retries = nextRetries(retries, usable(snapshot))
     })
   }
 

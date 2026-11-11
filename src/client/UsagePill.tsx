@@ -165,7 +165,9 @@ export function ComposerUsagePill({ form, directory }: ComposerUsageInjected): R
     })
   }
 
-  const usageAt = usage === undefined ? undefined : Date.parse(usage.asOf)
+  // `attemptedAt` is what a finished read moves, including a failed one that
+  // keeps the previous numbers; `asOf` alone would leave the button spinning.
+  const usageAt = usage === undefined ? undefined : Date.parse(usage.attemptedAt ?? usage.asOf)
   const refreshing = refreshingSince !== undefined && (usageAt === undefined || usageAt < refreshingSince)
 
   useEffect(() => {

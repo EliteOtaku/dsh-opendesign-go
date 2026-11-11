@@ -76,6 +76,21 @@ describe('parseUsage', () => {
     expect(snapshot?.windows).toEqual([])
   })
 
+  it('separates when the numbers were read from when the last attempt finished', () => {
+    // A failed read keeps the previous numbers, so its `asOf` stays behind while
+    // `attemptedAt` moves; the page settles its refresh button on the latter.
+    const snapshot = parseUsage(JSON.stringify({
+      asOf: '2026-11-11T09:00:15.251Z',
+      attemptedAt: '2026-11-11T09:12:00.000Z',
+      tier: 'go',
+      eligible: true,
+      windows: [],
+      error: 'vela billing funding-check failed',
+    }))
+    expect(snapshot?.asOf).toBe('2026-11-11T09:00:15.251Z')
+    expect(snapshot?.attemptedAt).toBe('2026-11-11T09:12:00.000Z')
+  })
+
   it('accepts a reading with no wallet', () => {
     const snapshot = parseUsage(JSON.stringify({
       asOf: '2026-10-19T03:00:00.000Z', tier: 'go', eligible: true, windows: [],
